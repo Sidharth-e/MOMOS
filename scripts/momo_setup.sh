@@ -46,10 +46,11 @@ sleep 1
 # Step 1: Check if Debian is installed
 if [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/debian" ]; then
     print_status success "Debian is already installed."
-    echo -e "${YELLOW}You can run it with:${NC}"
-    echo "  proot-distro login debian"
-    echo "Then inside Debian:"
-    echo "  ollama run <model-name>"
+    echo -e "${WHITE}Run:${NC}"
+    echo -e "${CYAN}  proot-distro login debian${NC}"
+    echo -e "${CYAN}  ollama run <Model>${NC}"
+    echo -e "${YELLOW}${STAR} Tip: Use 'tmux attach -t ollama_server' to manage Ollama.${NC}"
+    echo -e "${GREEN}${ROCKET} Enjoy your AI assistant!${NC}"
     exit 0
 fi
 
@@ -99,7 +100,9 @@ proot-distro login debian --shared-tmp -- bash -c "
     echo 'Setup complete!'
 "
 
-print_status success "Installation Complete"
-echo "To run the model:"
-echo "  proot-distro login debian"
-echo "  ollama run $MODEL_TAG"
+    echo -e "${GREEN}${SUCCESS} Installation Complete!${NC}"
+    echo -e "${WHITE}Run:${NC}"
+    echo -e "${CYAN}  proot-distro login debian${NC}"
+    echo -e "${CYAN}  ollama run ${SELECTED_MODEL}${NC}"
+    echo -e "${YELLOW}${STAR} Tip: Use 'tmux attach -t ollama_server' to manage Ollama.${NC}"
+    echo -e "${GREEN}${ROCKET} Enjoy your AI assistant!${NC}"
