@@ -481,19 +481,82 @@ proot-distro login debian -- bash -c "curl -fsSL https://ollama.ai/install.sh | 
 proot-distro login debian -- bash -c "ollama pull model_name"
 ```
 
-## 📄 License
+## 🔄 Keeping Ollama Running in Background
 
-This project is open source. Feel free to modify and distribute according to your needs.
+The installation script and launcher automatically start Ollama in a TMUX session named `ollama_server` to keep it running in the background.
 
-## 🤝 Contributing
+### Check if Ollama is Running
 
-Contributions are welcome! Areas for improvement:
-- Additional AI models and model families
-- More UI themes and customization options
-- Performance optimizations for mobile devices
-- Better error handling and recovery
-- Model performance benchmarking
-- Additional troubleshooting guides
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Check if TMUX session exists
+tmux list-sessions
+
+# Attach to the ollama_server session
+tmux attach-session -t ollama_server
+```
+
+**To detach and leave Ollama running:** Press `CTRL+B` then `D`
+
+### Start Ollama Server Manually
+
+If the server isn't running, you can start it manually:
+
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Create new TMUX session with Ollama server
+tmux new-session -d -s ollama_server 'ollama serve'
+
+# Verify it's running
+tmux list-sessions
+
+# Attach to monitor
+tmux attach-session -t ollama_server
+```
+
+### TMUX Session Management
+
+```bash
+# List all sessions
+tmux list-sessions
+
+# Attach to specific session
+tmux attach-session -t ollama_server
+
+# Kill a session
+tmux kill-session -t ollama_server
+
+# Create new session
+tmux new-session -d -s session_name 'command'
+```
+
+### Why Use TMUX?
+
+- **Background Operation**: Ollama keeps running even when you close Termux
+- **Easy Monitoring**: Attach/detach to check server status
+- **Persistent Sessions**: Server survives terminal restarts
+- **Resource Management**: Better control over background processes
+
+### Launcher Integration
+
+The launcher automatically:
+- Checks if `ollama_server` TMUX session exists
+- Creates the session if it's missing
+- Provides easy management through the Server Management menu
+- Shows session status in System Information
+
+## 🚀 Future Enhancements
+
+- **Additional AI models and model families**
+- **More UI themes and customization options**
+- **Performance optimizations for mobile devices**
+- **Better error handling and recovery**
+- **Model performance benchmarking**
+- **Additional troubleshooting guides**
 
 ## 📞 Support
 
