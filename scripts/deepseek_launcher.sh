@@ -192,38 +192,76 @@ check_installation() {
 
 # Function to start Ollama server
 start_ollama_server() {
-    echo "[*] Ensuring Ollama server is running..."
+    print_status "step" "Starting Ollama server..."
 
     # Step 1: Check if it's already running
-    if proot-distro login debian -- ss -tuln 2>/dev/null | grep -q ':11434'; then
-        echo "[OK] Ollama server already running."
+    if proot-distro login debian -- bash -c "ss -tuln 2>/dev/null | grep -q ':11434'" 2>/dev/null; then
+        print_status "success" "Ollama server already running on port 11434"
         return 0
     fi
 
-    echo "[*] Ollama server not running. Starting it now..."
+    print_status "info" "Ollama server not running. Starting it now..."
 
-    # Step 2: Kill any dead tmux session with same name
-    proot-distro login debian -- tmux kill-session -t ollama_server 2>/dev/null
+    # Step 2: Kill any existing tmux session with same name
+    proot-distro login debian -- bash -c "tmux kill-session -t ollama_server 2>/dev/null || true"
 
-    # Step 3: Start Ollama in tmux inside Debian using script for PTY
-    proot-distro login debian -- script -q -c \
-        "tmux new-session -d -s ollama_server 'ollama serve'" /dev/null
+    # Step 3: Wait a moment for cleanup
+    sleep 2
 
-    echo "[*] Waiting for Ollama to start on port 11434..."
+    # Step 4: Start Ollama in tmux inside Debian with proper error handling
+    print_status "info" "Creating TMUX session and starting Ollama..."
+    
+    if proot-distro login debian -- bash -c "
+        # Create new TMUX session with Ollama server
+        tmux new-session -d -s ollama_server 'ollama serve'
+        
+        # Wait a moment for the session to be created
+        sleep 2
+        
+        # Check if session was created successfully
+        if tmux has-session -t ollama_server 2>/dev/null; then
+            echo 'TMUX session created successfully'
+            exit 0
+        else
+            echo 'Failed to create TMUX session'
+            exit 1
+        fi
+    "; then
+        print_status "success" "TMUX session created successfully"
+    else
+        print_status "error" "Failed to create TMUX session"
+        return 1
+    fi
 
-    # Step 4: Wait until Ollama is actually listening (max 15s)
-    for i in $(seq 1 15); do
-        if proot-distro login debian -- ss -tuln 2>/dev/null | grep -q ':11434'; then
-            echo "[OK] Ollama server started successfully in TMUX session!"
-            echo "    To attach: proot-distro login debian -- tmux attach -t ollama_server"
-            echo "    To detach: Press CTRL+B then D"
+    # Step 5: Wait for Ollama to start and listen on port 11434
+    print_status "info" "Waiting for Ollama server to start (max 20 seconds)..."
+    
+    for i in $(seq 1 20); do
+        if proot-distro login debian -- bash -c "ss -tuln 2>/dev/null | grep -q ':11434'" 2>/dev/null; then
+            print_status "success" "Ollama server started successfully in TMUX session!"
+            print_status "info" "Session name: ollama_server"
+            print_status "info" "To attach: proot-distro login debian -- tmux attach-session -t ollama_server"
+            print_status "info" "To detach: Press CTRL+B then D"
             return 0
         fi
+        
+        # Show progress
+        printf "\r${CYAN}Waiting for server... ${i}/20${NC}"
         sleep 1
     done
-
-    echo "[ERROR] Ollama server failed to start. Check logs with:"
-    echo "    proot-distro login debian -- tmux attach -t ollama_server"
+    
+    echo ""  # New line after progress
+    print_status "error" "Ollama server failed to start within 20 seconds"
+    print_status "info" "Checking TMUX session status..."
+    
+    # Check what happened
+    if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+        print_status "warning" "TMUX session exists but Ollama may not be responding"
+        print_status "info" "Check logs with: proot-distro login debian -- tmux attach-session -t ollama_server"
+    else
+        print_status "error" "TMUX session was not created"
+    fi
+    
     return 1
 }
 

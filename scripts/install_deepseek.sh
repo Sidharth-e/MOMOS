@@ -156,7 +156,23 @@ main_installation() {
         curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
         
         echo '${GREEN}${CHECK_MARK}${NC} Starting Ollama server in background...'
-        tmux new-session -d -s ollama_server 'ollama serve' > /dev/null 2>&1
+        # Kill any existing session first
+        tmux kill-session -t ollama_server 2>/dev/null || true
+        sleep 2
+        # Create new session with proper error handling
+        if tmux new-session -d -s ollama_server 'ollama serve'; then
+            echo '${GREEN}${CHECK_MARK}${NC} TMUX session created successfully'
+            # Wait for Ollama to start
+            sleep 5
+            # Verify session exists
+            if tmux has-session -t ollama_server 2>/dev/null; then
+                echo '${GREEN}${CHECK_MARK}${NC} Ollama server session verified'
+            else
+                echo '${YELLOW}${STAR} Warning: TMUX session may not have been created properly'
+            fi
+        else
+            echo '${YELLOW}${STAR} Warning: Failed to create TMUX session'
+        fi
         
         echo '${GREEN}${CHECK_MARK}${NC} Downloading DeepSeek R1 1.5B model...'
         ollama pull deepseek-r1:1.5b > /dev/null 2>&1

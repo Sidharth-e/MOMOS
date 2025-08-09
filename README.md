@@ -120,6 +120,43 @@ bash scripts/install_deepseek.sh
 
 ## 🎯 Usage Instructions
 
+### Quick Ollama Server Commands
+
+**If you're having issues with the Ollama server, use these commands:**
+
+```bash
+# Start server (recommended)
+bash scripts/start_ollama.sh
+
+# Check server status
+bash scripts/start_ollama.sh status
+
+# Attach to server session
+bash scripts/start_ollama.sh attach
+
+# Restart server
+bash scripts/start_ollama.sh restart
+
+# Stop server
+bash scripts/start_ollama.sh stop
+```
+
+**Manual server management:**
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Start server manually
+tmux new-session -d -s ollama_server 'ollama serve'
+
+# Check if running
+tmux list-sessions
+ss -tuln | grep :11434
+
+# Attach to monitor
+tmux attach-session -t ollama_server
+```
+
 ### Starting the Launcher
 
 ```bash
@@ -216,7 +253,71 @@ pkg autoremove
 
 ### Launcher Issues
 
-#### 1. "proot-distro not found" error
+#### 1. "Ollama server not working through scripts" error
+
+**This is a common issue where the Ollama server only works manually but not through automation scripts.**
+
+**Symptoms:**
+- Server starts manually but fails when run through scripts
+- TMUX sessions not created properly
+- Scripts hang or fail silently
+
+**Root Causes:**
+- TMUX session creation timing issues
+- Insufficient wait time for Ollama to start
+- PTY (pseudo-terminal) allocation problems
+- Script execution environment differences
+
+**Solutions:**
+
+**A. Use the dedicated startup script:**
+```bash
+# Run the dedicated startup script
+bash scripts/start_ollama.sh
+
+# Check status
+bash scripts/start_ollama.sh status
+
+# Attach to session
+bash scripts/start_ollama.sh attach
+```
+
+**B. Manual TMUX session creation:**
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Clean up existing sessions
+tmux kill-session -t ollama_server 2>/dev/null || true
+sleep 3
+
+# Create new session with proper timing
+tmux new-session -d -s ollama_server 'ollama serve'
+sleep 5
+
+# Verify session and server
+tmux has-session -t ollama_server
+ss -tuln | grep :11434
+```
+
+**C. Check TMUX and Ollama installation:**
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Reinstall TMUX
+apt update && apt install tmux -y
+
+# Reinstall Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Test TMUX functionality
+tmux new-session -d -s test 'echo test'
+tmux has-session -t test
+tmux kill-session -t test
+```
+
+#### 2. "proot-distro not found" error
 
 **This is the most common issue!** Here are multiple solutions:
 
@@ -350,6 +451,63 @@ tmux list-sessions
 
 # Attach to monitor
 tmux attach-session -t ollama_server
+```
+
+### Fix Ollama Server Script Issues
+
+**If the Ollama server only works manually but not through scripts, try these solutions:**
+
+#### Solution 1: Use the Dedicated Startup Script
+```bash
+# Make the script executable (if on Linux/Mac)
+chmod +x scripts/start_ollama.sh
+
+# Start the server
+bash scripts/start_ollama.sh
+
+# Check status
+bash scripts/start_ollama.sh status
+
+# Attach to session
+bash scripts/start_ollama.sh attach
+```
+
+#### Solution 2: Manual TMUX Session Creation
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Kill any existing sessions
+tmux kill-session -t ollama_server 2>/dev/null || true
+
+# Wait for cleanup
+sleep 2
+
+# Create new session with proper error handling
+tmux new-session -d -s ollama_server 'ollama serve'
+
+# Verify session was created
+tmux has-session -t ollama_server
+
+# Check if Ollama is listening
+ss -tuln | grep :11434
+```
+
+#### Solution 3: Check TMUX and Ollama Installation
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Ensure TMUX is installed
+apt update && apt install tmux -y
+
+# Ensure Ollama is properly installed
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Restart the server
+tmux kill-session -t ollama_server 2>/dev/null || true
+sleep 2
+tmux new-session -d -s ollama_server 'ollama serve'
 ```
 
 ### TMUX Session Management
