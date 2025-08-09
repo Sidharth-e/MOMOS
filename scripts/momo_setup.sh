@@ -44,7 +44,7 @@ echo ""
 sleep 1
 
 # Step 1: Check if Debian is installed
-if proot-distro list | grep -wq "debian"; then
+if [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/debian" ]; then
     print_status success "Debian is already installed."
     echo -e "${YELLOW}You can run it with:${NC}"
     echo "  proot-distro login debian"
