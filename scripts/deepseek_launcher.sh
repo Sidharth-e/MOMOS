@@ -204,7 +204,7 @@ start_ollama_server() {
         print_status "info" "Starting Ollama server in background TMUX session..."
         
         # Method 1: Try direct TMUX session creation
-        if proot-distro login debian -- bash -c "tmux new-session -d -s ollama_server 'ollama serve' 2>/dev/null"; then
+        if proot-distro login debian -- script -q -c "tmux new-session -d -s ollama_server 'ollama serve'" /dev/null; then
             print_status "success" "Ollama server started successfully in TMUX session!"
             print_status "info" "Session name: ollama_server"
             print_status "info" "To attach: tmux attach-session -t ollama_server"
