@@ -590,7 +590,7 @@ main() {
     create_lightweight_config
     install_python_deps
     create_lightweight_scripts
-    create_readme
+    # create_readme  # Removed - now using consolidated README.md
     
     echo
     echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
@@ -627,7 +627,7 @@ main() {
     echo "3. Install a model: ./scripts/install-lightweight-model.sh phi-2-ggml"
     echo "4. Run inference: ./scripts/run-ggml-inference.sh \"Hello!\""
     echo
-    echo "See README-LIGHTWEIGHT.md for detailed instructions"
+    echo "See README.md for detailed instructions"
     echo
 }
 

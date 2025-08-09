@@ -223,7 +223,7 @@ main() {
     
     echo
     echo -e "${GREEN}Troubleshooting completed!${NC}"
-    echo "If you still have issues, check the README-LIGHTWEIGHT.md file"
+    echo "If you still have issues, check the README.md file"
 }
 
 # Run main function
