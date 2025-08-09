@@ -38,6 +38,25 @@ print_status() {
     esac
 }
 
+# Progress bar
+show_progress() {
+    local current=$1
+    local total=$2
+    local width=50
+    local percentage=$((current * 100 / total))
+    local completed=$((width * current / total))
+    local remaining=$((width - completed))
+    
+    printf "\r${CYAN}[${NC}"
+    printf "%${completed}s" | tr ' ' '█'
+    printf "%${remaining}s" | tr ' ' '░'
+    printf "${CYAN}]${NC} ${WHITE}%d%%${NC}" $percentage
+    
+    if [ $current -eq $total ]; then
+        echo ""
+    fi
+}
+
 # Header
 print_header() {
     clear
@@ -68,21 +87,31 @@ main_installation() {
 
     # Step 1: Update Termux
     print_step_header "1" "Updating Termux Packages"
-    apt update
-    apt upgrade -y
+    apt update > /dev/null 2>&1
+    show_progress 1 2
+    apt upgrade -y > /dev/null 2>&1
+    show_progress 2 2
     print_status "success" "Termux updated!"
     print_step_footer
 
     # Step 2: Install proot-distro
     print_step_header "2" "Installing PRoot-Distro"
-    pkg install proot-distro -y
+    pkg install proot-distro -y > /dev/null 2>&1
     print_status "success" "PRoot-Distro installed."
     print_step_footer
 
     # Step 3: Install Debian
     print_step_header "3" "Installing Debian 12"
     print_status "warning" "This may take a while..."
-    proot-distro install debian
+    proot-distro install debian > /dev/null 2>&1 &
+    pid=$!
+    dots=""
+    while kill -0 $pid 2>/dev/null; do
+        dots="${dots}."
+        printf "\r${CYAN}Installing Debian${dots}${NC}"
+        sleep 2
+    done
+    echo ""
     print_status "success" "Debian installed!"
     print_step_footer
 
@@ -111,18 +140,14 @@ main_installation() {
     print_step_header "4" "Configuring Debian"
     proot-distro login debian --shared-tmp -- bash -c "
         set -e
-        echo 'Updating Debian...'
-        apt update && apt upgrade -y
-        echo 'Installing tmux and curl...'
-        apt install tmux curl -y
-        echo 'Installing Ollama...'
-        curl -fsSL https://ollama.ai/install.sh | sh
-        echo 'Starting Ollama server in tmux...'
+        apt update > /dev/null 2>&1 && apt upgrade -y > /dev/null 2>&1
+        apt install tmux curl -y > /dev/null 2>&1
+        curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
         tmux kill-session -t ollama_server 2>/dev/null || true
+        sleep 2
         tmux new-session -d -s ollama_server 'ollama serve' || true
         sleep 5
-        echo 'Pulling model: ${SELECTED_MODEL}...'
-        ollama pull ${SELECTED_MODEL}
+        ollama pull ${SELECTED_MODEL} > /dev/null 2>&1
         echo 'Setup complete inside Debian.'
     "
     print_status "success" "Debian configured!"
