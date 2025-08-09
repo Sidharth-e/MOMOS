@@ -21,6 +21,7 @@ ARROW="→"
 STAR="★"
 GEAR="⚙️"
 DOWNLOAD="📥"
+ROCKET="🚀"
 
 print_status() {
     local status=$1
@@ -56,7 +57,6 @@ if [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/debian" ]; then
     exit 0
 fi
 
-
 # Step 2: Update Termux Packages
 print_status step "Updating Termux packages..."
 apt update && apt upgrade -y
@@ -69,7 +69,7 @@ pkg install proot-distro -y
 print_status step "Installing Debian 12..."
 proot-distro install debian
 
-# Step 5: Model selection (basic list)
+# Step 5: Model selection
 echo -e "\n${YELLOW}Select a model to install:${NC}"
 echo "1) deepseek-r1:1.5b"
 echo "2) deepseek-r1:7b"
@@ -103,11 +103,12 @@ proot-distro login debian --shared-tmp -- bash -c "
     echo 'Setup complete!'
 "
 
-echo -e "${GREEN}${SUCCESS} Installation Complete!${NC}"
+# Final message
+echo -e "${GREEN}${CHECK_MARK} Installation Complete!${NC}"
 echo -e "${WHITE}Run:${NC}"
 echo -e "${CYAN}  proot-distro login debian${NC}"
 echo -e "${YELLOW}${STAR} Create new TMUX session with Ollama server: tmux new-session -d -s ollama_server 'ollama serve'${NC}"
 echo -e "${YELLOW}${STAR} Verify it's running: Use tmux list-sessions${NC}"
-echo -e "${CYAN}  ollama run ${SELECTED_MODEL}${NC}"
+echo -e "${CYAN}  ollama run ${MODEL_TAG}${NC}"
 echo -e "${YELLOW}${STAR} Tip: Use tmux attach -t ollama_server to manage Ollama${NC}"
 echo -e "${GREEN}${ROCKET} Enjoy your AI assistant!${NC}"
