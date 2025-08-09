@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# MOMOS Termux Troubleshooting Script
-# Helps diagnose and fix common issues in Termux
+# MOMOS - Termux Troubleshooting Script for DeepSeek R1
+# This script helps diagnose and fix common issues
 
 set -e
 
@@ -12,218 +12,312 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Logging function
-log() {
-    echo -e "${GREEN}[MOMOS]${NC} $1"
-}
-
-warn() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-info() {
+# Function to print colored output
+print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
-# Check Termux environment
-check_termux() {
-    if [[ -z "$TERMUX_VERSION" ]]; then
-        error "This script is designed for Termux only!"
-        exit 1
-    fi
-    
-    log "Termux environment detected: $TERMUX_VERSION"
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
-# Check system resources
-check_resources() {
-    log "Checking system resources..."
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+echo "=========================================="
+echo "🔧 MOMOS - Termux Troubleshooting Script"
+echo "=========================================="
+echo ""
+
+# Check if running in Termux
+if [ ! -d "/data/data/com.termux" ]; then
+    print_error "This script must be run in Termux on Android!"
+    print_error "Please install Termux first and then run this script."
+    exit 1
+fi
+
+print_success "Termux environment detected"
+
+# Function to check system resources
+check_system_resources() {
+    print_status "Checking system resources..."
     
-    # Check available memory
-    if command -v free >/dev/null 2>&1; then
-        MEMORY_GB=$(free -g | awk '/^Mem:/{print $2}')
-        log "Available memory: ${MEMORY_GB}GB"
+    # Check available storage
+    available_storage=$(df /data | awk 'NR==2 {print $4}')
+    available_storage_gb=$((available_storage / 1024 / 1024))
+    
+    echo "📱 Available storage: ${available_storage_gb}GB"
+    if [ $available_storage_gb -lt 12 ]; then
+        print_warning "Low storage! You need at least 12GB for DeepSeek R1"
+        print_warning "Consider freeing up space or using external storage"
+    else
+        print_success "Storage space is sufficient ✓"
+    fi
+    
+    # Check available RAM
+    total_ram=$(cat /proc/meminfo | grep MemTotal | awk '{print $2}')
+    total_ram_gb=$((total_ram / 1024 / 1024))
+    
+    echo "💾 Total RAM: ${total_ram_gb}GB"
+    if [ $total_ram_gb -lt 8 ]; then
+        print_warning "Low RAM! You need at least 8GB for optimal performance"
+        print_warning "Consider closing other apps or using only the 1.5B model"
+    else
+        print_success "RAM is sufficient ✓"
+    fi
+    
+    # Check CPU info
+    if [ -f "/proc/cpuinfo" ]; then
+        cpu_model=$(grep "Hardware" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+        echo "🖥️  CPU: $cpu_model"
         
-        if [[ $MEMORY_GB -lt 2 ]]; then
-            warn "Low memory detected! Consider using only the smallest models"
+        if [[ "$cpu_model" == *"Snapdragon 8 Gen 2"* ]] || [[ "$cpu_model" == *"Snapdragon 8 Gen 3"* ]]; then
+            print_success "High-end processor detected ✓"
+        elif [[ "$cpu_model" == *"Snapdragon"* ]]; then
+            print_warning "Mid-range processor - performance may vary"
+        else
+            print_warning "Unknown processor - performance may be limited"
         fi
     fi
-    
-    # Check available disk space
-    DISK_FREE=$(df . | awk 'NR==2 {print $4}')
-    DISK_FREE_GB=$((DISK_FREE / 1024 / 1024))
-    log "Available disk space: ${DISK_FREE_GB}GB"
-    
-    if [[ $DISK_FREE_GB -lt 3 ]]; then
-        warn "Low disk space! You may need to free up space for models"
-    fi
-    
-    # Check external storage
-    if [[ -d "/storage/emulated/0" ]]; then
-        info "External storage detected at /storage/emulated/0"
-        info "Consider using external storage for large models"
-    fi
 }
 
-# Check Python environment
-check_python() {
-    log "Checking Python environment..."
+# Function to check Termux setup
+check_termux_setup() {
+    print_status "Checking Termux setup..."
     
-    # Check Python version
-    PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
-    log "Python version: $PYTHON_VERSION"
-    
-    # Check if virtual environment exists
-    if [[ -d "venv" ]]; then
-        log "Virtual environment found"
-        
-        # Activate and check packages
-        source venv/bin/activate
-        
-        # Check pip
-        PIP_VERSION=$(pip --version 2>&1 | cut -d' ' -f2)
-        log "Pip version: $PIP_VERSION"
-        
-        # Check installed packages
-        log "Checking installed packages..."
-        pip list | grep -E "(ctransformers|llama-cpp-python|onnxruntime|numpy|scipy)" || {
-            warn "Some key packages are missing"
-        }
-        
-        deactivate
+    # Check if proot-distro is installed
+    if command -v proot-distro &> /dev/null; then
+        print_success "proot-distro is installed ✓"
     else
-        warn "Virtual environment not found. Run setup-lightweight.sh first"
-    fi
-}
-
-# Try to install problematic packages
-install_packages() {
-    log "Attempting to install problematic packages..."
-    
-    if [[ ! -d "venv" ]]; then
-        error "Virtual environment not found. Run setup-lightweight.sh first"
+        print_error "proot-distro is not installed!"
+        echo "Run: pkg install proot-distro -y"
         return 1
     fi
     
-    source venv/bin/activate
+    # Check if Debian is installed
+    if proot-distro list | grep -q "debian"; then
+        print_success "Debian is installed ✓"
+    else
+        print_error "Debian is not installed!"
+        echo "Run: proot-distro install debian"
+        return 1
+    fi
     
-    # Try installing packages one by one
-    PACKAGES=("ctransformers" "llama-cpp-python" "onnxruntime-cpu")
-    
-    for package in "${PACKAGES[@]}"; do
-        log "Trying to install $package..."
-        
-        if pip install "$package"; then
-            log "✅ $package installed successfully"
-        else
-            warn "❌ $package failed to install"
-            
-            # Try alternative installation methods
-            case "$package" in
-                "ctransformers")
-                    log "Trying ctransformers with --no-deps..."
-                    pip install --no-deps ctransformers || warn "Alternative method failed"
-                    ;;
-                "llama-cpp-python")
-                    log "Trying llama-cpp-python with specific flags..."
-                    pip install llama-cpp-python --no-deps || warn "Alternative method failed"
-                    ;;
-                "onnxruntime-cpu")
-                    log "Trying onnxruntime-cpu..."
-                    pip install onnxruntime-cpu || warn "Alternative method failed"
-                    ;;
-            esac
-        fi
-    done
-    
-    deactivate
+    # Check if Ollama is installed in Debian
+    if proot-distro login debian -- command -v ollama &> /dev/null; then
+        print_success "Ollama is installed in Debian ✓"
+    else
+        print_error "Ollama is not installed in Debian!"
+        echo "Run the setup script again or install manually:"
+        echo "proot-distro login debian"
+        echo "curl -fsSL https://ollama.ai/install.sh | sh"
+        return 1
+    fi
 }
 
-# Check model files
-check_models() {
-    log "Checking model files..."
+# Function to check DeepSeek R1 installation
+check_deepseek_installation() {
+    print_status "Checking DeepSeek R1 installation..."
     
-    if [[ -d "models" ]]; then
-        MODEL_COUNT=$(find models -name "*.bin" -o -name "*.ggml*" 2>/dev/null | wc -l)
-        log "Found $MODEL_COUNT model files"
+    # Check if model is downloaded
+    if proot-distro login debian -- ollama list | grep -q "deepseek-r1:1.5b"; then
+        print_success "DeepSeek R1 1.5B model is installed ✓"
         
-        if [[ $MODEL_COUNT -eq 0 ]]; then
-            info "No models installed yet. Use install-lightweight-model.sh to install one"
+        # Get model size
+        model_size=$(proot-distro login debian -- ollama list | grep "deepseek-r1:1.5b" | awk '{print $3}')
+        echo "📦 Model size: $model_size"
+    else
+        print_warning "DeepSeek R1 model is not installed"
+        echo "To install: ollama pull deepseek-r1:1.5b"
+        return 1
+    fi
+}
+
+# Function to check Ollama server
+check_ollama_server() {
+    print_status "Checking Ollama server status..."
+    
+    if pgrep -f "ollama serve" > /dev/null; then
+        print_success "Ollama server is running ✓"
+        
+        # Check if server is responding
+        if proot-distro login debian -- timeout 5 ollama list &> /dev/null; then
+            print_success "Ollama server is responding ✓"
         else
-            find models -name "*.bin" -o -name "*.ggml*" 2>/dev/null | while read -r model; do
-                SIZE=$(du -h "$model" | cut -f1)
-                log "Model: $(basename "$model") ($SIZE)"
-            done
+            print_warning "Ollama server is running but not responding"
+            echo "Try restarting: killall ollama && tmux new-session -d -s ollama 'ollama serve'"
         fi
     else
-        warn "Models directory not found"
+        print_warning "Ollama server is not running"
+        echo "To start: tmux new-session -d -s ollama 'ollama serve'"
+        return 1
     fi
 }
 
-# Provide solutions
-provide_solutions() {
-    log "Providing solutions for common issues..."
+# Function to check network connectivity
+check_network() {
+    print_status "Checking network connectivity..."
     
-    echo
-    echo -e "${YELLOW}🔧 COMMON SOLUTIONS:${NC}"
-    echo
-    echo "1. If ML libraries fail to install:"
-    echo "   - This is normal in Termux"
-    echo "   - Use cloud inference instead"
-    echo "   - Try external model runners"
-    echo
-    echo "2. If you get memory errors:"
-    echo "   - Close other apps"
-    echo "   - Use smaller models (TinyLlama)"
-    echo "   - Reduce context length"
-    echo
-    echo "3. If you get disk space errors:"
-    echo "   - Use external storage"
-    echo "   - Remove unused models"
-    echo "   - Use cloud inference"
-    echo
-    echo "4. Alternative inference methods:"
-    echo "   - HuggingFace Inference API (free tier)"
-    echo "   - Google Colab (free)"
-    echo "   - OpenAI API (paid)"
-    echo
-    echo "5. For model management:"
-    echo "   - Use install-lightweight-model.sh"
-    echo "   - Download GGML/GGUF models only"
-    echo "   - Avoid full PyTorch models"
+    if ping -c 1 8.8.8.8 &> /dev/null; then
+        print_success "Internet connection is working ✓"
+    else
+        print_error "No internet connection!"
+        echo "Please check your WiFi or mobile data connection"
+        return 1
+    fi
+    
+    # Check if we can reach Ollama.ai
+    if curl -s --max-time 10 https://ollama.ai &> /dev/null; then
+        print_success "Can reach Ollama.ai ✓"
+    else
+        print_warning "Cannot reach Ollama.ai - may affect model downloads"
+    fi
 }
 
-# Main function
+# Function to check TMUX installation
+check_tmux() {
+    print_status "Checking TMUX installation..."
+    
+    if proot-distro login debian -- command -v tmux &> /dev/null; then
+        print_success "TMUX is installed in Debian ✓"
+    else
+        print_warning "TMUX is not installed in Debian"
+        echo "To install: proot-distro login debian -- apt install tmux -y"
+        return 1
+    fi
+}
+
+# Function to provide fixes
+provide_fixes() {
+    echo ""
+    echo "=========================================="
+    echo "🔧 Common Fixes"
+    echo "=========================================="
+    
+    if ! command -v proot-distro &> /dev/null; then
+        echo "1. Install proot-distro:"
+        echo "   pkg install proot-distro -y"
+        echo ""
+    fi
+    
+    if ! proot-distro list | grep -q "debian"; then
+        echo "2. Install Debian:"
+        echo "   proot-distro install debian"
+        echo ""
+    fi
+    
+    if ! proot-distro login debian -- command -v ollama &> /dev/null; then
+        echo "3. Install Ollama in Debian:"
+        echo "   proot-distro login debian"
+        echo "   curl -fsSL https://ollama.ai/install.sh | sh"
+        echo ""
+    fi
+    
+    if ! proot-distro login debian -- command -v tmux &> /dev/null; then
+        echo "4. Install TMUX in Debian:"
+        echo "   proot-distro login debian -- apt install tmux -y"
+        echo ""
+    fi
+    
+    if ! pgrep -f "ollama serve" > /dev/null; then
+        echo "5. Start Ollama server:"
+        echo "   proot-distro login debian -- tmux new-session -d -s ollama 'ollama serve'"
+        echo ""
+    fi
+    
+    if ! proot-distro login debian -- ollama list | grep -q "deepseek-r1:1.5b"; then
+        echo "6. Install DeepSeek R1 model:"
+        echo "   proot-distro login debian -- ollama pull deepseek-r1:1.5b"
+        echo ""
+    fi
+    
+    echo "7. If you're still having issues, try:"
+    echo "   - Restart Termux completely"
+    echo "   - Check Android permissions for Termux"
+    echo "   - Ensure you have enough storage and RAM"
+    echo "   - Run the setup script again: ./scripts/setup-deepseek-r1.sh"
+}
+
+# Function to run basic tests
+run_basic_tests() {
+    echo ""
+    echo "=========================================="
+    echo "🧪 Running Basic Tests"
+    echo "=========================================="
+    
+    # Test Debian access
+    print_status "Testing Debian access..."
+    if proot-distro login debian -- echo "Debian access test" &> /dev/null; then
+        print_success "Debian access working ✓"
+    else
+        print_error "Cannot access Debian environment"
+        return 1
+    fi
+    
+    # Test Ollama command
+    print_status "Testing Ollama command..."
+    if proot-distro login debian -- ollama --version &> /dev/null; then
+        print_success "Ollama command working ✓"
+    else
+        print_error "Ollama command not working"
+        return 1
+    fi
+    
+    # Test TMUX
+    print_status "Testing TMUX..."
+    if proot-distro login debian -- tmux -V &> /dev/null; then
+        print_success "TMUX working ✓"
+    else
+        print_error "TMUX not working"
+        return 1
+    fi
+}
+
+# Main troubleshooting function
 main() {
-    echo -e "${GREEN}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║              MOMOS Termux Troubleshooting                   ║"
-    echo "║         Diagnose and fix common Termux issues               ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+    print_status "Starting comprehensive troubleshooting..."
     
-    check_termux
-    check_resources
-    check_python
-    check_models
+    # Run all checks
+    check_system_resources
+    echo ""
     
-    echo
-    echo -e "${YELLOW}Would you like to try installing problematic packages? (y/n)${NC}"
-    read -r response
+    check_termux_setup
+    echo ""
     
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-        install_packages
-    fi
+    check_deepseek_installation
+    echo ""
     
-    provide_solutions
+    check_ollama_server
+    echo ""
     
-    echo
-    echo -e "${GREEN}Troubleshooting completed!${NC}"
-    echo "If you still have issues, check the README.md file"
+    check_network
+    echo ""
+    
+    check_tmux
+    echo ""
+    
+    run_basic_tests
+    echo ""
+    
+    # Provide fixes
+    provide_fixes
+    
+    echo ""
+    echo "=========================================="
+    echo "📋 Summary"
+    echo "=========================================="
+    echo "If all checks passed, you should be able to run:"
+    echo "  ./run-deepseek.sh"
+    echo ""
+    echo "If you have issues, try the fixes above or run:"
+    echo "  ./scripts/setup-deepseek-r1.sh"
+    echo ""
+    echo "For additional help, check the README-DEEPSEEK-R1.md file"
 }
 
 # Run main function

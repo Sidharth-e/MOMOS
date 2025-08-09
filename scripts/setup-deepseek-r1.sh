@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# MOMOS - Mobile Open-source Model Operating Script
-# DeepSeek R1 setup script that avoids PyTorch completely
+# MOMOS - DeepSeek R1 Setup Script for Termux
+# This script automates the complete setup process for running DeepSeek R1 locally on Android devices
 
 set -e  # Exit on any error
 
@@ -12,604 +12,256 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Logging function
-log() {
-    echo -e "${GREEN}[MOMOS]${NC} $1"
-}
-
-warn() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-info() {
+# Function to print colored output
+print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
-# Check if running in Termux
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to check if running in Termux
 check_termux() {
-    if [[ -n "$TERMUX_VERSION" ]]; then
-        log "Termux environment detected: $TERMUX_VERSION"
-        PLATFORM="termux"
-        
-        # Termux-specific optimizations
-        warn "Termux detected - some ML libraries may fail to install"
-        warn "This is normal and expected in Termux environment"
-        warn "The system will use fallback methods for inference"
-        
-        # Check Termux storage
-        if [[ -d "/storage/emulated/0" ]]; then
-            info "External storage detected - consider using it for large models"
-        fi
-        
-        # Check available memory
-        if command -v free >/dev/null 2>&1; then
-            MEMORY_GB=$(free -g | awk '/^Mem:/{print $2}')
-            if [[ $MEMORY_GB -lt 2 ]]; then
-                warn "Low memory detected: ${MEMORY_GB}GB - use smallest models only"
-            fi
-        fi
-        
+    if [ ! -d "/data/data/com.termux" ]; then
+        print_error "This script must be run in Termux on Android!"
+        print_error "Please install Termux first and then run this script."
+        exit 1
+    fi
+    print_success "Termux environment detected"
+}
+
+# Function to check system requirements
+check_requirements() {
+    print_status "Checking system requirements..."
+    
+    # Check available storage (minimum 12GB)
+    available_storage=$(df /data | awk 'NR==2 {print $4}')
+    available_storage_gb=$((available_storage / 1024 / 1024))
+    
+    if [ $available_storage_gb -lt 12 ]; then
+        print_warning "Available storage: ${available_storage_gb}GB"
+        print_warning "Recommended: At least 12GB free space"
+        print_warning "You may experience issues with larger models"
     else
-        log "Standard Linux environment detected"
-        PLATFORM="linux"
+        print_success "Available storage: ${available_storage_gb}GB ✓"
+    fi
+    
+    # Check available RAM
+    total_ram=$(cat /proc/meminfo | grep MemTotal | awk '{print $2}')
+    total_ram_gb=$((total_ram / 1024 / 1024))
+    
+    if [ $total_ram_gb -lt 8 ]; then
+        print_warning "Total RAM: ${total_ram_gb}GB"
+        print_warning "Recommended: At least 8GB RAM"
+        print_warning "Performance may be limited"
+    else
+        print_success "Total RAM: ${total_ram_gb}GB ✓"
     fi
 }
 
-# Update system packages
-update_system() {
-    log "Updating system packages..."
+# Function to setup Termux repository
+setup_termux_repo() {
+    print_status "Setting up Termux repository..."
     
-    if [[ "$PLATFORM" == "termux" ]]; then
-        pkg update -y
-        pkg upgrade -y
-    else
-        if command -v apt >/dev/null 2>&1; then
-            sudo apt update && sudo apt upgrade -y
-        elif command -v dnf >/dev/null 2>&1; then
-            sudo dnf update -y
-        elif command -v pacman >/dev/null 2>&1; then
-            sudo pacman -Syu --noconfirm
-        fi
+    if ! command -v termux-change-repo &> /dev/null; then
+        print_error "termux-change-repo command not found"
+        print_error "Please ensure you have the latest version of Termux installed"
+        exit 1
     fi
     
-    log "System packages updated"
+    # Change repository to main
+    termux-change-repo
+    
+    print_success "Termux repository configured"
 }
 
-# Install system dependencies
-install_system_deps() {
-    log "Installing system dependencies..."
+# Function to update Termux packages
+update_termux() {
+    print_status "Updating Termux packages..."
     
-    if [[ "$PLATFORM" == "termux" ]]; then
-        pkg install -y python git wget curl
-    else
-        if command -v apt >/dev/null 2>&1; then
-            sudo apt install -y python3 python3-pip python3-venv git wget curl
-        elif command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y python3 python3-pip python3-venv git wget curl
-        elif command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S --noconfirm python python-pip python-virtualenv git wget curl
-        fi
-    fi
+    print_status "Running: apt update && apt upgrade -y"
+    apt update && apt upgrade -y
     
-    log "System dependencies installed"
+    print_success "Termux packages updated"
 }
 
-# Create lightweight requirements
-create_lightweight_requirements() {
-    log "Creating lightweight requirements (no PyTorch)..."
+# Function to install Proot-Distro and Debian
+install_debian() {
+    print_status "Installing Proot-Distro and Debian..."
     
-    cat > requirements-lightweight.txt << 'EOF'
-# Lightweight requirements - No PyTorch needed!
-# Uses alternative libraries for mobile inference
-
-# Core libraries
-numpy>=1.24.0
-scipy>=1.10.0
-
-# Text processing (lightweight alternatives)
-tokenizers>=0.13.0
-sentencepiece>=0.1.99
-
-# Model inference alternatives
-onnxruntime>=1.15.0
-ctransformers>=0.2.0
-llama-cpp-python>=0.2.0
-
-# Utilities
-requests>=2.28.0
-tqdm>=4.64.0
-colorama>=0.4.6
-psutil>=5.9.0
-protobuf>=3.20.0
-
-# Optional: HuggingFace integration (without transformers)
-huggingface-hub>=0.16.0
-EOF
+    # Install proot-distro
+    print_status "Installing proot-distro..."
+    pkg install proot-distro -y
     
-    log "Lightweight requirements created"
+    # Install Debian
+    print_status "Installing Debian..."
+    proot-distro install debian
+    
+    print_success "Debian installed successfully"
 }
 
-# Create lightweight configuration for DeepSeek R1
-create_lightweight_config() {
-    log "Creating DeepSeek R1 configuration..."
+# Function to setup Debian environment
+setup_debian() {
+    print_status "Setting up Debian environment..."
     
-    cat > config/models-lightweight.json << 'EOF'
-{
-    "available_models": {
-        "deepseek-r1-instruct-ggml": {
-            "name": "DeepSeek R1 Instruct (GGML Quantized)",
-            "size_gb": 1.8,
-            "memory_gb": 2.0,
-            "url": "https://huggingface.co/TheBloke/deepseek-r1-instruct-GGML",
-            "quantized": true,
-            "mobile_optimized": true,
-            "format": "ggml",
-            "notes": "DeepSeek R1 Instruct model optimized for mobile Termux"
-        }
-    },
-    "default_model": "deepseek-r1-instruct-ggml",
-    "settings": {
-        "max_memory_usage": 0.6,
-        "quantization": "int4",
-        "batch_size": 1,
-        "max_length": 256,
-        "use_ggml": true,
-        "use_onnx": false,
-        "context_length": 2048
-    }
-}
-EOF
-    
-    log "DeepSeek R1 configuration created"
-}
-
-# Install Python dependencies
-install_python_deps() {
-    log "Installing Python dependencies (lightweight version)..."
-    
-    # Create virtual environment
-    python3 -m venv venv
-    source venv/bin/activate
-    
-    # Upgrade pip
-    pip install --upgrade pip
-    
-    # Install basic dependencies first
-    log "Installing basic dependencies..."
-    pip install numpy scipy requests tqdm colorama psutil protobuf
-    
-    # Try to install lightweight ML libraries with fallbacks
-    log "Installing lightweight ML libraries..."
-    
-    # Try ctransformers first (most reliable in Termux)
-    if pip install ctransformers; then
-        log "ctransformers installed successfully"
-    else
-        warn "ctransformers failed, trying alternative installation..."
-        # Try installing from source with minimal dependencies
-        pip install --no-deps ctransformers || {
-            warn "ctransformers installation failed, will use fallback methods"
-        }
-    fi
-    
-    # Try llama-cpp-python (can be problematic in Termux)
-    if pip install llama-cpp-python; then
-        log "llama-cpp-python installed successfully"
-    else
-        warn "llama-cpp-python failed, trying alternative installation..."
-        # Try installing with specific flags for Termux
-        pip install llama-cpp-python --no-deps || {
-            warn "llama-cpp-python installation failed, will use fallback methods"
-        }
-    fi
-    
-    # Try onnxruntime (can be slow in Termux)
-    if pip install onnxruntime; then
-        log "onnxruntime installed successfully"
-    else
-        warn "onnxruntime failed, trying alternative installation..."
-        # Try CPU-only version
-        pip install onnxruntime-cpu || {
-            warn "onnxruntime installation failed, will use fallback methods"
-        }
-    fi
-    
-    # Install other dependencies
-    log "Installing remaining dependencies..."
-    pip install tokenizers sentencepiece huggingface-hub
-    
-    log "Lightweight dependencies installation completed"
-    log "Note: Some ML libraries may have failed - this is normal in Termux"
-    log "The system will use fallback methods for inference"
-}
-
-# Create lightweight scripts
-create_lightweight_scripts() {
-    log "Creating lightweight scripts..."
-    
-    # GGML inference script
-    cat > scripts/run-ggml-inference.sh << 'EOF'
+    # Create a setup script for Debian
+    cat > /tmp/debian_setup.sh << 'EOF'
 #!/bin/bash
-# Run inference using GGML models (no PyTorch needed)
+set -e
 
-if [[ $# -eq 0 ]]; then
-    echo "Usage: $0 \"<prompt>\" [model-id]"
-    echo "Example: $0 \"Hello, how are you?\" phi-2-ggml"
-    exit 1
+echo "Updating Debian packages..."
+apt update && apt upgrade -y
+
+echo "Installing TMUX..."
+apt install tmux -y
+
+echo "Installing Ollama..."
+curl -fsSL https://ollama.ai/install.sh | sh
+
+echo "Debian setup completed successfully!"
+EOF
+    
+    # Make script executable and run it in Debian
+    chmod +x /tmp/debian_setup.sh
+    proot-distro login debian -- bash /tmp/debian_setup.sh
+    
+    print_success "Debian environment configured"
+}
+
+# Function to install and run DeepSeek R1
+install_deepseek() {
+    print_status "Installing DeepSeek R1..."
+    
+    # Create a script to run in Debian
+    cat > /tmp/install_deepseek.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Starting Ollama server in TMUX..."
+tmux new-session -d -s ollama 'ollama serve'
+
+echo "Waiting for Ollama server to start..."
+sleep 5
+
+echo "Installing DeepSeek R1 1.5B model..."
+ollama pull deepseek-r1:1.5b
+
+echo "DeepSeek R1 installation completed!"
+echo ""
+echo "To run DeepSeek R1:"
+echo "1. Open new TMUX session: tmux new-session -s deepseek"
+echo "2. Run the model: ollama run deepseek-r1:1.5b"
+echo "3. Use Ctrl+C to stop, Ctrl+D to exit"
+echo ""
+echo "TMUX shortcuts:"
+echo "- Ctrl+B then % : Split vertically"
+echo "- Ctrl+B then \" : Split horizontally"
+echo "- Ctrl+B then arrow keys : Navigate between panes"
+echo "- Ctrl+B then d : Detach session"
+echo "- tmux attach -t ollama : Reattach to Ollama session"
+EOF
+    
+    # Make script executable and run it in Debian
+    chmod +x /tmp/install_deepseek.sh
+    proot-distro login debian -- bash /tmp/install_deepseek.sh
+    
+    print_success "DeepSeek R1 installed successfully"
+}
+
+# Function to create usage script
+create_usage_script() {
+    print_status "Creating usage script..."
+    
+    cat > /data/data/com.termux/files/home/run-deepseek.sh << 'EOF'
+#!/bin/bash
+
+echo "=== DeepSeek R1 Local Runner ==="
+echo ""
+
+# Check if Ollama is running
+if ! pgrep -f "ollama serve" > /dev/null; then
+    echo "Starting Ollama server..."
+    proot-distro login debian -- tmux new-session -d -s ollama 'ollama serve'
+    sleep 3
 fi
 
-PROMPT=$1
-MODEL_ID=${2:-$(grep DEFAULT_MODEL .env | cut -d'=' -f2)}
+echo "Starting DeepSeek R1..."
+echo "Use Ctrl+C to stop the model"
+echo "Use Ctrl+D to exit"
+echo ""
 
-source .env
-
-python3 -c "
-import json
-import os
-from pathlib import Path
-
-def run_ggml_inference(prompt, model_id):
-    config_file = Path('config/models-lightweight.json')
-    if not config_file.exists():
-        print('Lightweight configuration file not found!')
-        return
-    
-    with open(config_file) as f:
-        config = json.load(f)
-    
-    if model_id not in config['available_models']:
-        print(f'Model {model_id} not found in lightweight configuration!')
-        return
-    
-    model_info = config['available_models'][model_id]
-    model_dir = Path(f'{os.environ[\"MOMOS_MODELS_DIR\"]}{model_id}')
-    
-    if not model_dir.exists():
-        print(f'Model {model_id} is not installed!')
-        print(f'Run: ./scripts/install-lightweight-model.sh {model_id}')
-        return
-    
-    print(f'Running GGML inference with {model_info[\"name\"]}...')
-    print(f'Prompt: {prompt}')
-    print('-' * 50)
-    
-    # Try multiple inference methods with fallbacks
-    inference_success = False
-    
-    # Method 1: Try ctransformers
-    if not inference_success:
-        try:
-            from ctransformers import AutoModelForCausalLM
-            print('Using ctransformers for inference...')
-            
-            # Find the GGML model file
-            model_files = list(model_dir.glob('*.ggml*.bin'))
-            if not model_files:
-                print('No GGML model files found!')
-                return
-            
-            model_file = model_files[0]
-            print(f'Using model file: {model_file.name}')
-            
-            # Load and run the model
-            llm = AutoModelForCausalLM.from_pretrained(
-                str(model_dir),
-                model_type='llama',  # Most GGML models are llama-based
-                gpu_layers=0,  # CPU only for mobile
-                lib='avx2'  # Use appropriate CPU optimization
-            )
-            
-            print('Model loaded successfully!')
-            print('Generating response...')
-            
-            # Generate response
-            response = llm(prompt, max_new_tokens=128, temperature=0.7)
-            print('\\nResponse:')
-            print(response)
-            inference_success = True
-            
-        except ImportError:
-            print('ctransformers not available, trying next method...')
-        except Exception as e:
-            print(f'ctransformers failed: {e}, trying next method...')
-    
-    # Method 2: Try llama-cpp-python
-    if not inference_success:
-        try:
-            from llama_cpp import Llama
-            print('Using llama-cpp-python for inference...')
-            
-            # Find the GGML model file
-            model_files = list(model_dir.glob('*.ggml*.bin'))
-            if not model_files:
-                print('No GGML model files found!')
-                return
-            
-            model_file = model_files[0]
-            print(f'Using model file: {model_file.name}')
-            
-            # Load and run the model
-            llm = Llama(
-                model_path=str(model_file),
-                n_ctx=128,  # Small context for mobile
-                n_threads=1,  # Single thread for mobile
-                n_gpu_layers=0  # CPU only
-            )
-            
-            print('Model loaded successfully!')
-            print('Generating response...')
-            
-            # Generate response
-            response = llm(prompt, max_tokens=128, temperature=0.7)
-            print('\\nResponse:')
-            print(response['choices'][0]['text'])
-            inference_success = True
-            
-        except ImportError:
-            print('llama-cpp-python not available, trying fallback...')
-        except Exception as e:
-            print(f'llama-cpp-python failed: {e}, trying fallback...')
-    
-    # Method 3: Fallback - show model info and instructions
-    if not inference_success:
-        print('\\n⚠️  No ML inference libraries available!')
-        print('\\nThis is common in Termux. Here are your options:')
-        print('\\n1. Install missing libraries manually:')
-        print('   pip install ctransformers llama-cpp-python')
-        print('\\n2. Use cloud inference instead:')
-        print('   - HuggingFace Inference API')
-        print('   - Google Colab (free)')
-        print('   - OpenAI API (paid)')
-        print('\\n3. Download pre-built binaries:')
-        print('   - Check if your model has pre-built inference tools')
-        print('   - Look for ARM64/Android versions')
-        print('\\n4. Use the model with external tools:')
-        print(f'   Model location: {model_dir}')
-        print(f'   Model files: {list(model_dir.glob(\"*.bin\"))}')
-        print('\\nFor now, showing model information:')
-        print(f'Model: {model_info[\"name\"]}')
-        print(f'Size: {model_info[\"size_gb\"]}GB')
-        print(f'Format: {model_info.get(\"format\", \"ggml\")}')
-        print(f'Notes: {model_info.get(\"notes\", \"No additional notes\")}')
-
-run_ggml_inference('$PROMPT', '$MODEL_ID')
-"
+# Run DeepSeek R1
+proot-distro login debian -- ollama run deepseek-r1:1.5b
 EOF
     
-    # Lightweight model installation script
-    cat > scripts/install-lightweight-model.sh << 'EOF'
-#!/bin/bash
-# Install lightweight GGML models
-
-if [[ $# -eq 0 ]]; then
-    echo "Usage: $0 <model-id>"
-    echo "Example: $0 phi-2-ggml"
-    exit 1
-fi
-
-MODEL_ID=$1
-source .env
-
-python3 -c "
-import json
-import os
-from pathlib import Path
-
-def install_lightweight_model(model_id):
-    config_file = Path('config/models-lightweight.json')
-    if not config_file.exists():
-        print('Lightweight configuration file not found!')
-        return
+    chmod +x /data/data/com.termux/files/home/run-deepseek.sh
     
-    with open(config_file) as f:
-        config = json.load(f)
-    
-    if model_id not in config['available_models']:
-        print(f'Model {model_id} not found in lightweight configuration!')
-        return
-    
-    model_info = config['available_models'][model_id]
-    model_dir = Path(f'{os.environ[\"MOMOS_MODELS_DIR\"]}{model_id}')
-    
-    if model_dir.exists():
-        print(f'Model {model_id} is already installed!')
-        return
-    
-    print(f'Installing lightweight model: {model_info[\"name\"]}')
-    print(f'Size: {model_info[\"size_gb\"]}GB')
-    print(f'Memory required: {model_info[\"memory_gb\"]}GB')
-    print(f'Format: {model_info.get(\"format\", \"ggml\")}')
-    print()
-    
-    # Check available space
-    import shutil
-    total, used, free = shutil.disk_usage('.')
-    free_gb = free // (1024**3)
-    
-    if free_gb < model_info['size_gb']:
-        print(f'Warning: Only {free_gb}GB free space available')
-        print(f'Model requires {model_info[\"size_gb\"]}GB')
-        return
-    
-    # Create model directory
-    model_dir.mkdir(parents=True, exist_ok=True)
-    print(f'Model directory created: {model_dir}')
-    
-    print()
-    print('To download the actual model files:')
-    print('1. Visit:', model_info['url'])
-    print('2. Download the .ggml.bin file (usually the smallest one)')
-    print('3. Place it in:', model_dir)
-    print()
-    print('Or use git-lfs if available:')
-    print(f'git clone {model_info[\"url\"]} {model_dir}')
-    print()
-    print('Note: GGML models are much smaller than full models!')
-
-install_lightweight_model('$MODEL_ID')
-"
-EOF
-    
-    # Make scripts executable
-    chmod +x scripts/*.sh
-    
-    log "Lightweight scripts created successfully"
+    print_success "Usage script created: ~/run-deepseek.sh"
 }
 
-# Create project structure
-create_structure() {
-    log "Creating project structure..."
-    
-    mkdir -p {models,config,logs,scripts,temp}
-    
-    # Create environment file
-    cat > .env << 'EOF'
-# MOMOS Lightweight Environment Configuration
-MOMOS_HOME=$(pwd)
-MOMOS_MODELS_DIR=models/
-MOMOS_LOGS_DIR=logs/
-MOMOS_TEMP_DIR=temp/
-MOMOS_CONFIG_DIR=config/
-
-# Model settings
-DEFAULT_MODEL=deepseek-r1-instruct-ggml
-MAX_MEMORY_USAGE=0.6
-QUANTIZATION=int4
-
-# Logging
-LOG_LEVEL=INFO
-LOG_FILE=logs/momos.log
-EOF
-    
-    log "Project structure created successfully"
+# Function to display final instructions
+show_final_instructions() {
+    echo ""
+    echo "=========================================="
+    echo "🎉 DeepSeek R1 Setup Completed! 🎉"
+    echo "=========================================="
+    echo ""
+    echo "📱 To run DeepSeek R1 locally:"
+    echo "   ./run-deepseek.sh"
+    echo ""
+    echo "🔧 Manual commands:"
+    echo "   # Start Ollama server:"
+    echo "   proot-distro login debian -- tmux new-session -d -s ollama 'ollama serve'"
+    echo ""
+    echo "   # Run DeepSeek R1:"
+    echo "   proot-distro login debian -- ollama run deepseek-r1:1.5b"
+    echo ""
+    echo "📚 Available models:"
+    echo "   - deepseek-r1:1.5b (1.1GB) - Recommended for most devices"
+    echo "   - deepseek-r1:7b (4.4GB) - Better performance, requires more resources"
+    echo "   - deepseek-r1:8b (4.9GB) - High-end devices only"
+    echo ""
+    echo "💡 Tips:"
+    echo "   - Use TMUX to keep sessions running in background"
+    echo "   - Monitor system resources while running models"
+    echo "   - Close other apps to free up memory"
+    echo ""
+    echo "🚀 Happy AI chatting!"
+    echo ""
 }
 
-# Create README for lightweight setup
-create_readme() {
-    log "Creating lightweight setup README..."
-    
-    cat > README-LIGHTWEIGHT.md << 'EOF'
-# MOMOS Lightweight Setup
-
-This is a PyTorch-free version of MOMOS that uses lightweight alternatives for mobile inference.
-
-## What's Different?
-
-- **No PyTorch**: Uses GGML/GGUF models instead
-- **Smaller Models**: Models are 0.7-1.4GB instead of 2-13GB
-- **Faster Inference**: Optimized for mobile devices
-- **Lower Memory**: Uses 1-1.5GB RAM instead of 4-8GB
-
-## Supported Models
-
-1. **Phi-2 GGML** (1.4GB) - Best overall performance
-2. **TinyLlama GGML** (0.7GB) - Fastest, smallest
-3. **GPT4All-J GGML** (1.2GB) - Good balance
-
-## Installation
-
-```bash
-# Run the lightweight setup
-./scripts/setup-lightweight.sh
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install a model
-./scripts/install-lightweight-model.sh phi-2-ggml
-
-# Run inference
-./scripts/run-ggml-inference.sh "Hello, world!"
-```
-
-## Requirements
-
-- Python 3.8+
-- 2GB free disk space
-- 2GB RAM
-- No PyTorch needed!
-
-## Performance
-
-- **Inference Speed**: 2-5x faster than PyTorch models
-- **Memory Usage**: 50-80% less RAM
-- **Model Size**: 80-90% smaller files
-- **Quality**: Slightly lower but still good for most tasks
-
-## Troubleshooting
-
-If you get import errors:
-```bash
-pip install ctransformers llama-cpp-python
-```
-
-For best performance, use the smallest model that meets your needs.
-EOF
-    
-    log "Lightweight README created"
-}
-
-# Main setup function
+# Main execution
 main() {
-    echo -e "${GREEN}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║              MOMOS DeepSeek R1 Setup Script                 ║"
-    echo "║         Mobile Open-source Model Operating Script           ║"
-    echo "║                    (No PyTorch!)                            ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+    echo "=========================================="
+    echo "🤖 MOMOS - DeepSeek R1 Setup Script"
+    echo "=========================================="
+    echo ""
     
+    print_status "Starting DeepSeek R1 setup process..."
+    
+    # Check environment
     check_termux
-    update_system
-    install_system_deps
-    create_structure
-    create_lightweight_requirements
-    create_lightweight_config
-    install_python_deps
-    create_lightweight_scripts
-    # create_readme  # Removed - now using consolidated README.md
+    check_requirements
     
-    echo
-    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}🎉 MOMOS DeepSeek R1 setup completed! 🎉${NC}"
-    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
-    echo
-    echo "✅ No PyTorch needed!"
-    echo "📱 DeepSeek R1 optimized for mobile Termux"
-    echo "⚡ Fast inference with GGML optimization"
-    echo
+    # Setup process
+    setup_termux_repo
+    update_termux
+    install_debian
+    setup_debian
+    install_deepseek
+    create_usage_script
     
-    # Termux-specific instructions
-    if [[ "$PLATFORM" == "termux" ]]; then
-        echo -e "${YELLOW}📱 TERMUX-SPECIFIC NOTES:${NC}"
-        echo "Some ML libraries may have failed to install (this is normal in Termux)"
-        echo "The system will use fallback methods for inference"
-        echo
-        echo "If you want to try installing the libraries manually:"
-        echo "1. Activate virtual environment: source venv/bin/activate"
-        echo "2. Try: pip install ctransformers"
-        echo "3. Try: pip install llama-cpp-python"
-        echo "4. Try: pip install onnxruntime-cpu"
-        echo
-        echo "If all libraries fail, you can still:"
-        echo "- Download and manage models"
-        echo "- Use cloud inference APIs"
-        echo "- Run models with external tools"
-        echo
-    fi
-    
-    echo "Next steps:"
-    echo "1. Activate virtual environment: source venv/bin/activate"
-    echo "2. View DeepSeek R1 configuration: cat config/models-lightweight.json"
-echo "3. Install DeepSeek R1 model: ./scripts/install-lightweight-model.sh deepseek-r1-instruct-ggml"
-    echo "4. Run inference: ./scripts/run-ggml-inference.sh \"Hello!\""
-    echo
-    echo "See README.md for detailed instructions"
-    echo
+    # Show final instructions
+    show_final_instructions
 }
 
 # Run main function
