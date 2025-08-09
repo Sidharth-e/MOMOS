@@ -1,6 +1,6 @@
 # MOMOS - Modern AI for Termux 🚀
 
-A beautiful and modern UI implementation for running multiple AI models locally on Termux (Android), including DeepSeek R1, Llama 3, Mistral, and more.
+A beautiful and modern UI implementation for running AI models locally on Termux (Android) using DeepSeek R1, with a comprehensive launcher and installation system.
 
 ## 📋 Table of Contents
 
@@ -9,9 +9,6 @@ A beautiful and modern UI implementation for running multiple AI models locally 
 - [Installation Guide](#-installation-guide)
 - [Usage Instructions](#-usage-instructions)
 - [Troubleshooting](#-troubleshooting)
-- [Common Issues](#-common-issues)
-- [Advanced Configuration](#-advanced-configuration)
-- [Performance Tips](#-performance-tips)
 - [FAQ](#-faq)
 
 ## ✨ Features
@@ -19,24 +16,12 @@ A beautiful and modern UI implementation for running multiple AI models locally 
 - **Modern Terminal UI** with colors, emojis, and progress bars
 - **Interactive Installation** with step-by-step progress
 - **Beautiful Launcher** with multiple management options
-- **Multi-Model Support** - Choose from various AI models
+- **DeepSeek R1 Support** - Multiple model sizes available
 - **Model Management** - Download, remove, and manage models
-- **Progress Indicators** for long-running operations
-- **Error Handling** with graceful fallbacks
-- **Server Management** for Ollama backend
-- **System Information** display
+- **Ollama Server Management** - Start/stop/check server status
+- **TMUX Integration** - Keep Ollama running in background
+- **System Diagnostics** - Comprehensive troubleshooting tools
 - **Automatic Path Detection** for better compatibility
-
-## 🎨 UI Elements
-
-- **Color-coded status messages** (Green for success, Red for errors, etc.)
-- **Unicode symbols** and emojis for visual appeal
-- **Progress bars** for installation steps
-- **Box-drawing characters** for headers and menus
-- **Interactive menus** with numbered options
-- **Clear visual hierarchy** for better readability
-- **Current model display** in header
-- **Enhanced error messages** with troubleshooting steps
 
 ## 🤖 Supported Models
 
@@ -82,16 +67,12 @@ A beautiful and modern UI implementation for running multiple AI models locally 
 **⚠️ IMPORTANT: Do NOT install Termux from Google Play Store**
 
 1. **Download from F-Droid (Recommended):**
-   ```bash
-   # Install F-Droid first, then search for "Termux"
-   # Or download directly: https://f-droid.org/packages/com.termux/
-   ```
+   - Install F-Droid first, then search for "Termux"
+   - Or download directly: https://f-droid.org/packages/com.termux/
 
 2. **Download from GitHub:**
-   ```bash
-   # Visit: https://github.com/termux/termux-app/releases
-   # Download the latest APK for your architecture
-   ```
+   - Visit: https://github.com/termux/termux-app/releases
+   - Download the latest APK for your architecture
 
 3. **Install the APK** and grant necessary permissions
 
@@ -108,28 +89,19 @@ pkg install git wget curl -y
 termux-setup-storage
 ```
 
-### Step 3: Clone/Download Scripts
+### Step 3: Clone Repository
 
 ```bash
-# Option 1: Clone repository
+# Clone the repository
 git clone https://github.com/Sidharth-e/MOMOS.git
 cd MOMOS
 
-# Option 2: Download manually
-# Download the scripts folder to your device
-```
-
-### Step 4: Make Scripts Executable
-
-```bash
-# Make installation script executable
+# Make scripts executable
 chmod +x scripts/install_deepseek.sh
-
-# Make launcher executable
 chmod +x scripts/deepseek_launcher.sh
 ```
 
-### Step 5: Run Installation
+### Step 4: Run Installation
 
 ```bash
 # Run the installation script
@@ -142,6 +114,7 @@ bash scripts/install_deepseek.sh
 3. Installs Debian 12
 4. Installs Ollama
 5. Downloads DeepSeek R1 1.5B model
+6. Sets up TMUX session for background Ollama server
 
 **Expected Time:** 10-30 minutes depending on internet speed
 
@@ -162,7 +135,9 @@ bash scripts/deepseek_launcher.sh
 4. **Check Model Status** - Verify model availability
 5. **Manage Models** - List, remove, and get model info
 6. **System Information** - View Termux and system details
-7. **Exit** - Clean exit from the launcher
+7. **Run Diagnostics** - Comprehensive system troubleshooting
+8. **TMUX Tips** - Learn TMUX session management
+9. **Exit** - Clean exit from the launcher
 
 ### Model Selection
 
@@ -340,148 +315,7 @@ proot-distro login debian -- bash -c "ollama list"
 proot-distro login debian -- bash -c "ollama rm model_name"
 ```
 
-## 🔍 Advanced Configuration
-
-### Customizing the Launcher
-
-#### Change Default Model
-```bash
-# Edit the launcher script
-nano scripts/deepseek_launcher.sh
-
-# Find this line and change the model:
-CURRENT_MODEL="deepseek-r1:1.5b"
-```
-
-#### Custom Color Scheme
-```bash
-# Edit color variables at the top of scripts
-# Available colors: RED, GREEN, YELLOW, BLUE, PURPLE, CYAN, WHITE
-```
-
-#### Add Custom Models
-```bash
-# Edit the show_available_models function
-# Add your preferred models to the list
-```
-
-### Environment Variables
-
-```bash
-# Set custom Ollama server URL
-export OLLAMA_HOST=0.0.0.0:11434
-
-# Set custom model path
-export OLLAMA_MODELS=/path/to/models
-
-# Add to ~/.bashrc for persistence
-echo 'export OLLAMA_HOST=0.0.0.0:11434' >> ~/.bashrc
-```
-
-### Performance Optimization
-
-#### For Mobile Devices
-```bash
-# Use smaller models (1.5B, 7B, 8B)
-# Close other apps to free RAM
-# Enable battery optimization for Termux
-```
-
-#### For High-End Devices
-```bash
-# Use larger models (14B, 32B, 70B)
-# Increase swap space if needed
-# Monitor temperature during long sessions
-```
-
-## 📊 Performance Tips
-
-### Model Selection Guidelines
-
-| Device Type | RAM | Recommended Models | Performance |
-|-------------|-----|-------------------|-------------|
-| **Low-end** | 2-3GB | 1.5B, 7B | Fast, basic quality |
-| **Mid-range** | 4-6GB | 8B, 14B | Balanced, good quality |
-| **High-end** | 8GB+ | 32B, 70B | Slow, excellent quality |
-
-### Memory Management
-
-```bash
-# Monitor memory usage
-watch -n 1 'free -h'
-
-# Clear memory cache
-echo 3 > /proc/sys/vm/drop_caches
-
-# Restart Ollama server if memory gets high
-proot-distro login debian -- bash -c "pkill ollama && ollama serve"
-```
-
-### Storage Optimization
-
-```bash
-# Regular cleanup
-proot-distro login debian -- bash -c "ollama list"
-proot-distro login debian -- bash -c "ollama rm unused_model"
-
-# Compress models (if supported)
-# Some models support quantization for smaller size
-```
-
-## ❓ FAQ
-
-### Q: Why is the launcher showing "proot-distro not found"?
-**A:** This is usually a PATH issue. Try:
-1. `pkg install proot-distro -y`
-2. Check if it's in your PATH: `echo $PATH`
-3. Restart Termux completely
-
-### Q: How much storage do I need?
-**A:** Minimum 2GB for basic models, 5GB+ recommended for multiple models.
-
-### Q: Can I run multiple models at once?
-**A:** Yes, but each model uses significant RAM. Use smaller models for mobile devices.
-
-### Q: Why is the model loading slowly?
-**A:** Larger models require more RAM and processing power. Use 1.5B or 7B models for faster loading.
-
-### Q: How do I update models?
-**A:** Use the launcher's "Select/Download Model" option or manually run `ollama pull model_name`.
-
-### Q: Can I use this without internet?
-**A:** After initial installation and model download, you can use models offline.
-
-### Q: Why is Termux crashing?
-**A:** Usually due to insufficient RAM. Use smaller models and close other apps.
-
-### Q: How do I backup my models?
-**A:** Models are stored in the Debian environment. You can copy the Ollama directory or use the launcher's model management.
-
-## 🔄 Updates
-
-### Updating Termux
-```bash
-pkg update && pkg upgrade -y
-```
-
-### Updating Debian
-```bash
-proot-distro login debian -- bash -c "apt update && apt upgrade -y"
-```
-
-### Updating Ollama
-```bash
-proot-distro login debian -- bash -c "curl -fsSL https://ollama.ai/install.sh | sh"
-```
-
-### Updating Models
-```bash
-# Use the launcher's model selection
-# Or manually:
-proot-distro login debian -- bash -c "ollama pull model_name"
-```
-
-## 🔄 Keeping Ollama Running in Background
+## 🔄 TMUX Session Management
 
 The installation script and launcher automatically start Ollama in a TMUX session named `ollama_server` to keep it running in the background.
 
@@ -541,41 +375,58 @@ tmux new-session -d -s session_name 'command'
 - **Persistent Sessions**: Server survives terminal restarts
 - **Resource Management**: Better control over background processes
 
-### Launcher Integration
+## ❓ FAQ
 
-The launcher automatically:
-- Checks if `ollama_server` TMUX session exists
-- Creates the session if it's missing
-- Provides easy management through the Server Management menu
-- Shows session status in System Information
+### Q: Why is the launcher showing "proot-distro not found"?
+**A:** This is usually a PATH issue. Try:
+1. `pkg install proot-distro -y`
+2. Check if it's in your PATH: `echo $PATH`
+3. Restart Termux completely
 
-### Chat Functionality
+### Q: How much storage do I need?
+**A:** Minimum 2GB for basic models, 5GB+ recommended for multiple models.
 
-When you start a chat through the launcher:
-1. **Automatically enters Debian environment** using `proot-distro login debian`
-2. **Runs the model directly** with `ollama run model_name`
-3. **Provides interactive chat** inside the Debian environment
-4. **Easy return** to launcher by typing `exit` or pressing `CTRL+C`
+### Q: Can I run multiple models at once?
+**A:** Yes, but each model uses significant RAM. Use smaller models for mobile devices.
 
-**Example chat session:**
+### Q: Why is the model loading slowly?
+**A:** Larger models require more RAM and processing power. Use 1.5B or 7B models for faster loading.
+
+### Q: How do I update models?
+**A:** Use the launcher's "Select/Download Model" option or manually run `ollama pull model_name`.
+
+### Q: Can I use this without internet?
+**A:** After initial installation and model download, you can use models offline.
+
+### Q: Why is Termux crashing?
+**A:** Usually due to insufficient RAM. Use smaller models and close other apps.
+
+### Q: How do I backup my models?
+**A:** Models are stored in the Debian environment. You can copy the Ollama directory or use the launcher's model management.
+
+## 🔄 Updates
+
+### Updating Termux
 ```bash
-# Launcher automatically runs:
-proot-distro login debian -- bash -c "
-    echo 'Starting chat session...'
-    ollama run deepseek-r1:1.5b
-"
+pkg update && pkg upgrade -y
 ```
 
-This ensures that all Ollama operations happen in the correct environment with proper access to models and dependencies.
+### Updating Debian
+```bash
+proot-distro login debian -- bash -c "apt update && apt upgrade -y"
+```
 
-## 🚀 Future Enhancements
+### Updating Ollama
+```bash
+proot-distro login debian -- bash -c "curl -fsSL https://ollama.ai/install.sh | sh"
+```
 
-- **Additional AI models and model families**
-- **More UI themes and customization options**
-- **Performance optimizations for mobile devices**
-- **Better error handling and recovery**
-- **Model performance benchmarking**
-- **Additional troubleshooting guides**
+### Updating Models
+```bash
+# Use the launcher's model selection
+# Or manually:
+proot-distro login debian -- bash -c "ollama pull model_name"
+```
 
 ## 📞 Support
 
@@ -583,13 +434,14 @@ If you're still having issues:
 
 1. **Check the troubleshooting section** above
 2. **Run the system information** option in the launcher
-3. **Check Termux logs**: `logcat | grep termux`
-4. **Verify your Android version** and Termux compatibility
-5. **Try a fresh Termux installation** if all else fails
+3. **Use the diagnostics tool** (Option 7) for comprehensive troubleshooting
+4. **Check Termux logs**: `logcat | grep termux`
+5. **Verify your Android version** and Termux compatibility
+6. **Try a fresh Termux installation** if all else fails
 
 ---
 
-**Enjoy your modern multi-model AI experience on Termux! 🧠✨🤖**
+**Enjoy your modern AI experience on Termux! 🧠✨🤖**
 
 *If this README helped you, consider giving it a star! ⭐*
 
