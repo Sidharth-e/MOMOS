@@ -1,0 +1,92 @@
+# MOMOS .gitignore
+# Mobile Open-source Model Operating Script
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Models (too large for git)
+models/
+*.bin
+*.safetensors
+*.gguf
+*.ggml
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+temp/
+temp_*.py
+temp_*.sh
+*.tmp
+
+# Environment variables
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Mobile specific
+*.apk
+*.ipa
+*.aab
+
+# HuggingFace cache
+.cache/
+huggingface/
+
+# PyTorch
+*.pth
+*.pt
+
+# Jupyter
+.ipynb_checkpoints
+
+# Coverage
+.coverage
+htmlcov/
+
+# pytest
+.pytest_cache/
