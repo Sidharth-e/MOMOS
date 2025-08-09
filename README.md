@@ -1,282 +1,134 @@
 # MOMOS (Mobile Open-source Model Operating Script) - DeepSeek R1 Edition
 
 A streamlined solution for running DeepSeek R1 AI model on Android devices using Termux, optimized for mobile performance.
-
-## 🎯 What is MOMOS?
-
-MOMOS is a collection of shell scripts designed specifically for Termux on Android to:
-- Set up lightweight AI model environments (no PyTorch needed!)
-- Configure models for mobile device optimization
-- Run inference with minimal setup hassle
-- Troubleshoot common Termux issues
-- Provide fallback methods when ML libraries fail
-
-## 🚀 Features
-
-- **DeepSeek R1 Focused**: Optimized specifically for DeepSeek R1 model
-- **Termux-optimized**: Built specifically for Android Termux environment
-- **Lightweight setup**: No heavy PyTorch dependencies
-- **Mobile-optimized**: Pre-configured for mobile device constraints
-- **One-command setup**: Run a single script to get everything working
-- **GGML optimized**: Uses GGML format for best mobile performance
-
-## 📱 Supported Platform
-
-- **Android**: Termux terminal emulator only
-
-## 🛠️ Quick Start (5 Minutes)
-
-### Prerequisites
-- Termux app installed on your Android device
-- Internet connection for setup
-- At least 2GB free storage space
-
-### Installation
-```bash
-# Clone or download the project
-git clone https://github.com/Sidharth-e/momos.git
-cd momos
-
-# Make scripts executable
-chmod +x scripts/*.sh
-
-# Use DeepSeek R1 setup (recommended for Termux)
-./scripts/setup-deepseek-r1.sh
-
-# If you encounter issues, run troubleshooting:
-./scripts/termux-troubleshoot.sh
-```
-
-### Step-by-Step Setup
-
-#### Step 1: Clone and Setup
-```bash
-git clone <your-repo-url>
-cd MOMOS
-./scripts/setup-deepseek-r1.sh
-```
-
-#### Step 2: Activate Environment
-```bash
-source venv/bin/activate
-```
-
-#### Step 3: Install DeepSeek R1 Model
-```bash
-./scripts/install-lightweight-model.sh deepseek-r1-instruct-ggml
-```
-
-#### Step 4: Test It
-```bash
-./scripts/run-ggml-inference.sh "Hello, how are you?"
-```
-
-## 🔧 Setup Options
-
-### DeepSeek R1 Setup
-```bash
-# Use DeepSeek R1 setup (no PyTorch needed)
-./scripts/setup-deepseek-r1.sh
-```
-
-**Why DeepSeek R1 is Best for Termux:**
-- ✅ **No PyTorch needed** - avoids ARM64 compatibility issues
-- ✅ **Optimized size** (1.8GB - perfect balance for mobile)
-- ✅ **Fast inference** with GGML optimization
-- ✅ **Mobile-optimized** for Termux
-- ✅ **High quality** - DeepSeek R1 is a powerful model
-- ✅ **Context aware** - supports up to 2048 tokens
-
-
-
-### Troubleshooting
-```bash
-# Run the troubleshooting script if you have issues
-./scripts/termux-troubleshoot.sh
-```
-
-## 📊 DeepSeek R1 Model Specifications
-
-| Feature | Specification | Notes |
-|---------|---------------|-------|
-| **Model** | DeepSeek R1 Instruct | Latest instruction-tuned model |
-| **Size** | 1.8GB | Optimized for mobile devices |
-| **Memory** | 2.0GB | Efficient memory usage |
-| **Format** | GGML Quantized | Best mobile performance |
-| **Context** | 2048 tokens | Good conversation length |
-| **Quality** | ⭐⭐⭐⭐⭐ | High-quality responses |
-| **Speed** | ⚡⚡⚡ | Fast inference on mobile |
-
-## ⚠️ What to Expect in Termux
-
-- **Some packages will fail to install** - This is normal and expected!
-- **The system will continue working** - Uses fallback methods
-- **You can still manage models** - Download, organize, etc.
-- **Inference may use alternatives** - Cloud APIs, external tools
-
-## 🔍 Troubleshooting
-
-### Common Termux Issues
-
-#### 1. Package Installation Fails
-```bash
-# This is normal in Termux! Run troubleshooting:
-./scripts/termux-troubleshoot.sh
-
-# Or try manual fixes:
-pip install ctransformers
-pip install llama-cpp-python
-```
-
-#### 2. Out of Memory
-- Close other apps to free up memory
-- DeepSeek R1 is optimized for mobile memory usage
-- Context length is already optimized for 2048 tokens
-
-#### 3. Permission Denied
-```bash
-# Make sure scripts are executable
-chmod +x scripts/*.sh
-```
-
-#### 4. Storage Issues
-```bash
-# Check available space
-df -h
-
-# Use external storage if available
-# Models can go in /storage/emulated/0/
-```
-
-### Getting Help
-```bash
-# Run diagnostics
-./scripts/termux-troubleshoot.sh
-
-# Check logs
-tail -f logs/momos.log
-
-# View configuration
-cat config/models-lightweight.json
-```
-
-## 🌐 Cloud Inference Alternatives
-
-When local inference fails or is too slow:
-
-1. **HuggingFace Inference API** (free tier)
-2. **Google Colab** (free)
-3. **OpenAI API** (paid)
-
-## 📁 Project Structure
-
-```
-MOMOS/
-├── venv/                    # Python environment
-├── models/                  # Your models go here
-├── config/                  # Configuration files
-├── scripts/                 # Helper scripts
-├── logs/                    # Log files
-└── .env                     # Environment variables
-```
-
-## 🎯 Next Steps After Setup
-
-1. **Explore DeepSeek R1 config**: `cat config/models-lightweight.json`
-2. **Install DeepSeek R1 model**: Use the install script
-3. **Customize settings**: Edit `.env` file
-4. **Check logs**: Look in `logs/` directory
-
-## 💡 Pro Tips
-
-1. **DeepSeek R1 is optimized** - Perfect balance of size and quality
-2. **Use external storage** - Models can go in `/storage/emulated/0/`
-3. **Close other apps** - Free up memory for inference
-4. **Keep Termux updated** - Run `pkg update` regularly
-5. **Use GGML format** - Best performance on mobile devices
-
-## 🚨 Common Issues & Quick Fixes
-
-### "Package installation failed"
-- This is normal in Termux
-- System will use fallback methods
-- You can still manage models
-
-### "Model not found"
-```bash
-# Run: ./scripts/install-lightweight-model.sh deepseek-r1-instruct-ggml
-# Check: ls models/
-```
-
-### "Inference failed"
-- Try cloud inference instead
-- Use external model runners
-- Check model file integrity
-
-## 🔧 Advanced Configuration
-
-### Environment Variables
-```bash
-# Edit .env file to customize:
-MOMOS_MODELS_DIR=./models/
-MOMOS_LOG_LEVEL=INFO
-MOMOS_DEFAULT_MODEL=tiny-llama-ggml
-```
-
-### DeepSeek R1 Configuration
-```bash
-# Edit config/models-lightweight.json to customize DeepSeek R1 settings
-# Adjust memory usage, context length, and other parameters
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 📖 Additional Documentation
-
-- **[DeepSeek R1 Setup Guide](README-DEEPSEEK-R1.md)** - Detailed instructions for DeepSeek R1 setup
-- **[Termux Troubleshooting](scripts/termux-troubleshoot.sh)** - Common issues and solutions
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Open-source model developers
-- Termux development team
-- Mobile AI community
+## 📋 Requirements
+- **Android device** with at least:
+  - 8 GB RAM
+  - Snapdragon 8 Gen 2 or equivalent CPU
+  - 12 GB free storage
+- **Termux** installed from the official GitHub or F-Droid source
+- Stable internet connection
 
 ---
 
-## 📱 Termux-Specific Notes
+## 🚀 Installation
 
-**Remember**: Termux is different from regular Linux. Some things will fail, but the system is designed to handle it gracefully and provide alternatives!
+### 1. Install Termux
+Download Termux from the **official GitHub releases page**:  
+[https://github.com/termux/termux-app/releases](https://github.com/termux/termux-app/releases)  
+or from **F-Droid**:  
+[https://f-droid.org/packages/com.termux/](https://f-droid.org/packages/com.termux/)
 
-### What Gets Created During Setup
-
-The setup scripts will create:
-- `requirements-lightweight.txt` - No PyTorch dependencies
-- `config/models-lightweight.json` - DeepSeek R1 configuration
-- `scripts/run-ggml-inference.sh` - GGML inference script
-- `scripts/install-lightweight-model.sh` - DeepSeek R1 installation
-- `scripts/termux-troubleshoot.sh` - Termux troubleshooting
-- `README-LIGHTWEIGHT.md` - Detailed instructions
-
-### Performance Tips
-
-- DeepSeek R1 is optimized for mobile performance
-- Close other apps to free up memory
-- Use external storage if available
-- Keep Termux updated
-- GGML format provides best mobile performance
-- Context length optimized for 2048 tokens
+> **Note:** Do not install Termux from the Google Play Store — it's outdated and unsupported.
 
 ---
 
-**Made with ❤️ for the Termux mobile AI community - DeepSeek R1 Edition**
+### 2. Clone or Copy the Script
+Open Termux and run:
+```bash
+pkg update && pkg upgrade -y
+pkg install git -y
+git clone https://github.com/yourusername/deepseek-termux.git
+cd deepseek-termux
+chmod +x install_deepseek.sh
+````
+
+---
+
+### 3. Run the Script
+
+```bash
+./install_deepseek.sh
+```
+
+This will:
+
+1. Install **Proot-Distro**
+2. Install **Debian 12** inside Termux
+3. Install **tmux** and **Ollama**
+4. Download the **DeepSeek R1 1.5B** model
+5. Start the Ollama server in a background TMUX session
+
+---
+
+## ▶️ Running DeepSeek R1
+
+After installation:
+
+```bash
+proot-distro login debian
+ollama run deepseek-r1:1.5b
+```
+
+If you installed another model (e.g., `8b`), change the command:
+
+```bash
+ollama run deepseek-r1:8b
+```
+
+---
+
+## 🔄 Keeping Ollama Running in Background
+
+The installation script starts Ollama in a **TMUX** session named `ollama_server`.
+
+To check if it's running:
+
+```bash
+tmux attach-session -t ollama_server
+```
+
+Press `CTRL+B` then `D` to detach and leave it running.
+
+If it’s not running:
+
+```bash
+tmux new-session -d -s ollama_server 'ollama serve'
+```
+
+---
+
+## 🧹 Common Issues
+
+### 1. `Permission Denied` when accessing storage
+
+Run:
+
+```bash
+termux-setup-storage
+```
+
+Then grant permissions in Android Settings.
+
+### 2. `Package not found` error
+
+Make sure Termux packages are updated:
+
+```bash
+apt update && apt upgrade -y
+```
+
+### 3. Ollama server not running
+
+Start it manually in TMUX:
+
+```bash
+tmux new-session -d -s ollama_server 'ollama serve'
+```
+
+---
+
+## 📌 Notes
+
+* Larger models (e.g., `8B`, `14B`, `32B`, `70B`) require much more RAM and storage.
+* The 1.5B model is recommended for most Android devices for smoother performance.
+* Use `CTRL+C` to stop the model and `CTRL+D` to exit Debian.
+
+---
+
+## 📜 License
+
+This project is provided as-is under the MIT License.
+Ollama and DeepSeek are trademarks of their respective owners.
+
+
