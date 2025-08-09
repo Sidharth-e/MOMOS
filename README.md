@@ -17,6 +17,8 @@ MOMOS is a collection of shell scripts and tools designed to make it easy to:
 - **Model variety**: Support for multiple popular open-source models
 - **Cross-platform**: Works on Android (Termux), iOS (iSH), and Linux
 - **Resource management**: Automatic memory and storage optimization
+- **Termux-optimized**: Enhanced lightweight setup with fallback methods
+- **Smart troubleshooting**: Built-in diagnostics and problem-solving tools
 
 ## 📱 Supported Platforms
 
@@ -42,7 +44,31 @@ cd momos
 # Make scripts executable
 chmod +x scripts/*.sh
 
-# Run the main setup script
+# Choose your setup method:
+# Standard setup (Linux/Windows)
+./scripts/setup.sh
+
+# Lightweight setup (Termux/Android - recommended)
+./scripts/setup-lightweight.sh
+
+# Termux-specific setup (if lightweight fails)
+./scripts/setup-termux.sh
+```
+
+### Platform-Specific Setup
+
+#### For Termux (Android) - Recommended
+```bash
+# Use lightweight setup (no PyTorch needed)
+./scripts/setup-lightweight.sh
+
+# If you encounter issues, run troubleshooting:
+./scripts/termux-troubleshoot.sh
+```
+
+#### For Linux/Windows
+```bash
+# Use standard setup
 ./scripts/setup.sh
 ```
 
@@ -83,10 +109,35 @@ Models can be configured in `config/models.json`:
 1. **Out of memory**: Reduce model size in config
 2. **Slow performance**: Enable GPU acceleration if available
 3. **Download fails**: Check internet connection and try again
+4. **Package installation fails** (Termux): This is normal - use lightweight setup
+
+### Platform-Specific Help
+
+#### Termux (Android)
+```bash
+# Run the troubleshooting script
+./scripts/termux-troubleshoot.sh
+
+# Use lightweight setup (recommended)
+./scripts/setup-lightweight.sh
+
+# Check the Termux guide
+cat TERMUX-QUICK-START.md
+```
+
+#### Linux/Windows
+```bash
+# Run debug script
+./scripts/debug.sh
+
+# Check system requirements
+./scripts/check-requirements.sh
+```
 
 ### Getting Help
 - Check the logs in `logs/` directory
 - Run `./scripts/debug.sh` for system diagnostics
+- For Termux: Run `./scripts/termux-troubleshoot.sh`
 - Open an issue on GitHub
 
 ## 📊 Performance Tips

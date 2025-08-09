@@ -34,6 +34,25 @@ check_termux() {
     if [[ -n "$TERMUX_VERSION" ]]; then
         log "Termux environment detected: $TERMUX_VERSION"
         PLATFORM="termux"
+        
+        # Termux-specific optimizations
+        warn "Termux detected - some ML libraries may fail to install"
+        warn "This is normal and expected in Termux environment"
+        warn "The system will use fallback methods for inference"
+        
+        # Check Termux storage
+        if [[ -d "/storage/emulated/0" ]]; then
+            info "External storage detected - consider using it for large models"
+        fi
+        
+        # Check available memory
+        if command -v free >/dev/null 2>&1; then
+            MEMORY_GB=$(free -g | awk '/^Mem:/{print $2}')
+            if [[ $MEMORY_GB -lt 2 ]]; then
+                warn "Low memory detected: ${MEMORY_GB}GB - use smallest models only"
+            fi
+        fi
+        
     else
         log "Standard Linux environment detected"
         PLATFORM="linux"
@@ -178,11 +197,53 @@ install_python_deps() {
     # Upgrade pip
     pip install --upgrade pip
     
-    # Install lightweight requirements
-    log "Installing lightweight dependencies..."
-    pip install -r requirements-lightweight.txt
+    # Install basic dependencies first
+    log "Installing basic dependencies..."
+    pip install numpy scipy requests tqdm colorama psutil protobuf
     
-    log "Lightweight dependencies installed successfully"
+    # Try to install lightweight ML libraries with fallbacks
+    log "Installing lightweight ML libraries..."
+    
+    # Try ctransformers first (most reliable in Termux)
+    if pip install ctransformers; then
+        log "ctransformers installed successfully"
+    else
+        warn "ctransformers failed, trying alternative installation..."
+        # Try installing from source with minimal dependencies
+        pip install --no-deps ctransformers || {
+            warn "ctransformers installation failed, will use fallback methods"
+        }
+    fi
+    
+    # Try llama-cpp-python (can be problematic in Termux)
+    if pip install llama-cpp-python; then
+        log "llama-cpp-python installed successfully"
+    else
+        warn "llama-cpp-python failed, trying alternative installation..."
+        # Try installing with specific flags for Termux
+        pip install llama-cpp-python --no-deps || {
+            warn "llama-cpp-python installation failed, will use fallback methods"
+        }
+    fi
+    
+    # Try onnxruntime (can be slow in Termux)
+    if pip install onnxruntime; then
+        log "onnxruntime installed successfully"
+    else
+        warn "onnxruntime failed, trying alternative installation..."
+        # Try CPU-only version
+        pip install onnxruntime-cpu || {
+            warn "onnxruntime installation failed, will use fallback methods"
+        }
+    fi
+    
+    # Install other dependencies
+    log "Installing remaining dependencies..."
+    pip install tokenizers sentencepiece huggingface-hub
+    
+    log "Lightweight dependencies installation completed"
+    log "Note: Some ML libraries may have failed - this is normal in Termux"
+    log "The system will use fallback methods for inference"
 }
 
 # Create lightweight scripts
@@ -235,48 +296,104 @@ def run_ggml_inference(prompt, model_id):
     print(f'Prompt: {prompt}')
     print('-' * 50)
     
-    try:
-        # Try to use ctransformers for GGML inference
-        from ctransformers import AutoModelForCausalLM
-        
-        # Find the GGML model file
-        model_files = list(model_dir.glob('*.ggml*.bin'))
-        if not model_files:
-            print('No GGML model files found!')
-            return
-        
-        model_file = model_files[0]
-        print(f'Using model file: {model_file.name}')
-        
-        # Load and run the model
-        llm = AutoModelForCausalLM.from_pretrained(
-            str(model_dir),
-            model_type='llama',  # Most GGML models are llama-based
-            gpu_layers=0,  # CPU only for mobile
-            lib='avx2'  # Use appropriate CPU optimization
-        )
-        
-        print('Model loaded successfully!')
-        print('Generating response...')
-        
-        # Generate response
-        response = llm(prompt, max_new_tokens=128, temperature=0.7)
-        print('\\nResponse:')
-        print(response)
-        
-    except ImportError:
-        print('ctransformers not available, trying alternative...')
+    # Try multiple inference methods with fallbacks
+    inference_success = False
+    
+    # Method 1: Try ctransformers
+    if not inference_success:
+        try:
+            from ctransformers import AutoModelForCausalLM
+            print('Using ctransformers for inference...')
+            
+            # Find the GGML model file
+            model_files = list(model_dir.glob('*.ggml*.bin'))
+            if not model_files:
+                print('No GGML model files found!')
+                return
+            
+            model_file = model_files[0]
+            print(f'Using model file: {model_file.name}')
+            
+            # Load and run the model
+            llm = AutoModelForCausalLM.from_pretrained(
+                str(model_dir),
+                model_type='llama',  # Most GGML models are llama-based
+                gpu_layers=0,  # CPU only for mobile
+                lib='avx2'  # Use appropriate CPU optimization
+            )
+            
+            print('Model loaded successfully!')
+            print('Generating response...')
+            
+            # Generate response
+            response = llm(prompt, max_new_tokens=128, temperature=0.7)
+            print('\\nResponse:')
+            print(response)
+            inference_success = True
+            
+        except ImportError:
+            print('ctransformers not available, trying next method...')
+        except Exception as e:
+            print(f'ctransformers failed: {e}, trying next method...')
+    
+    # Method 2: Try llama-cpp-python
+    if not inference_success:
         try:
             from llama_cpp import Llama
-            print('Using llama-cpp-python...')
-            # Implementation would go here
-            print('llama-cpp-python inference placeholder')
+            print('Using llama-cpp-python for inference...')
+            
+            # Find the GGML model file
+            model_files = list(model_dir.glob('*.ggml*.bin'))
+            if not model_files:
+                print('No GGML model files found!')
+                return
+            
+            model_file = model_files[0]
+            print(f'Using model file: {model_file.name}')
+            
+            # Load and run the model
+            llm = Llama(
+                model_path=str(model_file),
+                n_ctx=128,  # Small context for mobile
+                n_threads=1,  # Single thread for mobile
+                n_gpu_layers=0  # CPU only
+            )
+            
+            print('Model loaded successfully!')
+            print('Generating response...')
+            
+            # Generate response
+            response = llm(prompt, max_tokens=128, temperature=0.7)
+            print('\\nResponse:')
+            print(response['choices'][0]['text'])
+            inference_success = True
+            
         except ImportError:
-            print('No GGML inference libraries available!')
-            print('Install: pip install ctransformers llama-cpp-python')
-    except Exception as e:
-        print(f'Inference failed: {e}')
-        print('Check that the model files are properly downloaded')
+            print('llama-cpp-python not available, trying fallback...')
+        except Exception as e:
+            print(f'llama-cpp-python failed: {e}, trying fallback...')
+    
+    # Method 3: Fallback - show model info and instructions
+    if not inference_success:
+        print('\\n⚠️  No ML inference libraries available!')
+        print('\\nThis is common in Termux. Here are your options:')
+        print('\\n1. Install missing libraries manually:')
+        print('   pip install ctransformers llama-cpp-python')
+        print('\\n2. Use cloud inference instead:')
+        print('   - HuggingFace Inference API')
+        print('   - Google Colab (free)')
+        print('   - OpenAI API (paid)')
+        print('\\n3. Download pre-built binaries:')
+        print('   - Check if your model has pre-built inference tools')
+        print('   - Look for ARM64/Android versions')
+        print('\\n4. Use the model with external tools:')
+        print(f'   Model location: {model_dir}')
+        print(f'   Model files: {list(model_dir.glob(\"*.bin\"))}')
+        print('\\nFor now, showing model information:')
+        print(f'Model: {model_info[\"name\"]}')
+        print(f'Size: {model_info[\"size_gb\"]}GB')
+        print(f'Format: {model_info.get(\"format\", \"ggml\")}')
+        print(f'Notes: {model_info.get(\"notes\", \"No additional notes\")}')
 
 run_ggml_inference('$PROMPT', '$MODEL_ID')
 "
@@ -484,6 +601,26 @@ main() {
     echo "📱 Mobile-optimized GGML models"
     echo "⚡ Fast inference with low memory usage"
     echo
+    
+    # Termux-specific instructions
+    if [[ "$PLATFORM" == "termux" ]]; then
+        echo -e "${YELLOW}📱 TERMUX-SPECIFIC NOTES:${NC}"
+        echo "Some ML libraries may have failed to install (this is normal in Termux)"
+        echo "The system will use fallback methods for inference"
+        echo
+        echo "If you want to try installing the libraries manually:"
+        echo "1. Activate virtual environment: source venv/bin/activate"
+        echo "2. Try: pip install ctransformers"
+        echo "3. Try: pip install llama-cpp-python"
+        echo "4. Try: pip install onnxruntime-cpu"
+        echo
+        echo "If all libraries fail, you can still:"
+        echo "- Download and manage models"
+        echo "- Use cloud inference APIs"
+        echo "- Run models with external tools"
+        echo
+    fi
+    
     echo "Next steps:"
     echo "1. Activate virtual environment: source venv/bin/activate"
     echo "2. View lightweight models: cat config/models-lightweight.json"
