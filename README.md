@@ -1,39 +1,33 @@
 # MOMOS (Mobile Open-source Model Operating Script)
 
-A streamlined solution for running open-source AI models on mobile devices without the usual setup complexity.
+A streamlined solution for running open-source AI models on Android devices using Termux.
 
 ## 🎯 What is MOMOS?
 
-MOMOS is a collection of shell scripts and tools designed to make it easy to:
-- Download and set up open-source AI models
-- Configure them for mobile device optimization
+MOMOS is a collection of shell scripts designed specifically for Termux on Android to:
+- Set up lightweight AI model environments
+- Configure models for mobile device optimization
 - Run inference with minimal setup hassle
-- Manage model versions and updates
+- Troubleshoot common Termux issues
 
 ## 🚀 Features
 
-- **One-command setup**: Run a single script to get everything working
+- **Termux-optimized**: Built specifically for Android Termux environment
+- **Lightweight setup**: No heavy PyTorch dependencies
+- **Smart troubleshooting**: Built-in diagnostics for Termux issues
 - **Mobile-optimized**: Pre-configured for mobile device constraints
-- **Model variety**: Support for multiple popular open-source models
-- **Cross-platform**: Works on Android (Termux), iOS (iSH), and Linux
-- **Resource management**: Automatic memory and storage optimization
-- **Termux-optimized**: Enhanced lightweight setup with fallback methods
-- **Smart troubleshooting**: Built-in diagnostics and problem-solving tools
+- **One-command setup**: Run a single script to get everything working
 
-## 📱 Supported Platforms
+## 📱 Supported Platform
 
-- **Android**: Termux, UserLAnd, or similar terminal emulators
-- **iOS**: iSH, a-Shell, or similar terminal apps
-- **Linux**: Native Linux distributions
-- **Windows**: WSL2 or Git Bash
+- **Android**: Termux terminal emulator only
 
 ## 🛠️ Quick Start
 
 ### Prerequisites
-- Terminal/Shell access on your mobile device
-- Internet connection for model downloads
+- Termux app installed on your Android device
+- Internet connection for setup
 - At least 2GB free storage space
-- Python 3.8+ (will be installed automatically if needed)
 
 ### Installation
 ```bash
@@ -44,108 +38,52 @@ cd momos
 # Make scripts executable
 chmod +x scripts/*.sh
 
-# Choose your setup method:
-# Standard setup (Linux/Windows)
-./scripts/setup.sh
-
-# Lightweight setup (Termux/Android - recommended)
-./scripts/setup-lightweight.sh
-
-# Termux-specific setup (if lightweight fails)
-./scripts/setup-termux.sh
-```
-
-### Platform-Specific Setup
-
-#### For Termux (Android) - Recommended
-```bash
-# Use lightweight setup (no PyTorch needed)
+# Use lightweight setup (recommended for Termux)
 ./scripts/setup-lightweight.sh
 
 # If you encounter issues, run troubleshooting:
 ./scripts/termux-troubleshoot.sh
 ```
 
-#### For Linux/Windows
+### Termux Setup
+
+#### Recommended: Lightweight Setup
 ```bash
-# Use standard setup
-./scripts/setup.sh
+# Use lightweight setup (no PyTorch needed)
+./scripts/setup-lightweight.sh
 ```
 
-### Basic Usage
+#### Alternative: Full Termux Setup
 ```bash
-# List available models
-./scripts/list-models.sh
-
-# Install a specific model
-./scripts/install-model.sh llama-2-7b
-
-# Run inference
-./scripts/run-inference.sh "Hello, how are you?"
-
-# Check system status
-./scripts/status.sh
+# If lightweight fails, use full setup
+./scripts/setup-termux.sh
 ```
 
-## 📋 Available Models
-
-- **LLaMA 2** (7B, 13B variants)
-- **Mistral** (7B, Mixtral variants)
-- **Phi-2** (Microsoft's lightweight model)
-- **Gemma** (Google's open models)
-- **Custom models** (add your own!)
-
-## ⚙️ Configuration
-
-Models can be configured in `config/models.json`:
-- Model size and type
-- Memory allocation
-- Performance settings
-- Custom parameters
+#### Troubleshooting
+```bash
+# Run the troubleshooting script if you have issues
+./scripts/termux-troubleshoot.sh
+```
 
 ## 🔧 Troubleshooting
 
-### Common Issues
-1. **Out of memory**: Reduce model size in config
-2. **Slow performance**: Enable GPU acceleration if available
-3. **Download fails**: Check internet connection and try again
-4. **Package installation fails** (Termux): This is normal - use lightweight setup
-
-### Platform-Specific Help
-
-#### Termux (Android)
-```bash
-# Run the troubleshooting script
-./scripts/termux-troubleshoot.sh
-
-# Use lightweight setup (recommended)
-./scripts/setup-lightweight.sh
-
-# Check the Termux guide
-cat TERMUX-QUICK-START.md
-```
-
-#### Linux/Windows
-```bash
-# Run debug script
-./scripts/debug.sh
-
-# Check system requirements
-./scripts/check-requirements.sh
-```
+### Common Termux Issues
+1. **Package installation fails**: This is normal - use lightweight setup
+2. **Out of memory**: Close other apps and use smaller models
+3. **Permission denied**: Make sure scripts are executable with `chmod +x`
+4. **Storage issues**: Check available space with `df -h`
 
 ### Getting Help
-- Check the logs in `logs/` directory
-- Run `./scripts/debug.sh` for system diagnostics
-- For Termux: Run `./scripts/termux-troubleshoot.sh`
+- Run `./scripts/termux-troubleshoot.sh` for diagnostics
+- Check the Termux guide: `cat TERMUX-QUICK-START.md`
 - Open an issue on GitHub
 
 ## 📊 Performance Tips
 
-- Use smaller models (7B parameters) for mobile devices
-- Enable quantization for faster inference
+- Use lightweight setup for better performance
 - Close other apps to free up memory
-- Use SSD storage when possible
+- Use external storage if available
+- Keep Termux updated
 
 ## 🤝 Contributing
 
@@ -162,9 +100,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - Open-source model developers
-- Mobile development community
-- Terminal app developers
+- Termux development team
+- Mobile AI community
 
 ---
 
-**Made with ❤️ for the mobile AI community**
+**Made with ❤️ for the Termux mobile AI community**
