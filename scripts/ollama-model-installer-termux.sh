@@ -2,6 +2,7 @@
 
 # DeepSeek R1 Installation Script for Termux (Debian via Proot-Distro + Ollama)
 # Modern UI with colors, progress bars, and interactive elements
+# Fixed model selection bug for Termux interactive input
 # Tested for DeepSeek R1 1.5B model on Android with Termux
 
 set -e
@@ -177,14 +178,15 @@ main_installation() {
         *) print_status "warning" "Invalid choice, defaulting to deepseek-r1:1.5b"
            MODEL_NAME="deepseek-r1:1.5b" ;;
     esac
-    
+
+    # Install inside Debian and download selected model
     proot-distro login debian --shared-tmp -- bash -c "
         set -e
         apt update > /dev/null 2>&1 && apt upgrade -y > /dev/null 2>&1
         apt install tmux curl -y > /dev/null 2>&1
         curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
         tmux new-session -d -s ollama_server 'ollama serve' > /dev/null 2>&1
-        ollama pull ${MODEL_NAME} > /dev/null 2>&1
+        ollama pull '$MODEL_NAME' > /dev/null 2>&1
     "
     
     print_status "success" "Debian environment configured successfully!"
