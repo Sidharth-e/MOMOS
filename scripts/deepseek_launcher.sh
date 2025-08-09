@@ -63,16 +63,58 @@ print_header() {
 
 # Function to check if Debian and Ollama are available
 check_installation() {
-    if ! command -v proot-distro &> /dev/null; then
+    print_status "step" "Checking installation status..."
+    
+    # Check for proot-distro with multiple methods
+    local proot_found=false
+    
+    # Method 1: Check if command exists
+    if command -v proot-distro &> /dev/null; then
+        proot_found=true
+        print_status "success" "PRoot-Distro found via command -v"
+    fi
+    
+    # Method 2: Check common paths
+    if [ ! "$proot_found" = true ]; then
+        for path in "/data/data/com.termux/files/usr/bin/proot-distro" "/usr/bin/proot-distro" "$HOME/.local/bin/proot-distro"; do
+            if [ -f "$path" ]; then
+                proot_found=true
+                print_status "success" "PRoot-Distro found at: $path"
+                break
+            fi
+        done
+    fi
+    
+    # Method 3: Check if we can run it
+    if [ ! "$proot_found" = true ]; then
+        if proot-distro --help &> /dev/null; then
+            proot_found=true
+            print_status "success" "PRoot-Distro found via execution test"
+        fi
+    fi
+    
+    if [ ! "$proot_found" = true ]; then
         print_status "error" "PRoot-Distro not found. Please run the installation script first."
+        echo ""
+        echo -e "${YELLOW}Troubleshooting:${NC}"
+        echo -e "${CYAN}1.${NC} Run: ${WHITE}pkg install proot-distro -y${NC}"
+        echo -e "${CYAN}2.${NC} Run: ${WHITE}bash scripts/install_deepseek.sh${NC}"
+        echo -e "${CYAN}3.${NC} Check if Termux packages are updated: ${WHITE}pkg update${NC}"
         return 1
     fi
     
+    # Check if Debian is installed
+    print_status "step" "Checking Debian installation..."
     if ! proot-distro list | grep -q "debian"; then
         print_status "error" "Debian not found. Please run the installation script first."
+        echo ""
+        echo -e "${YELLOW}To install Debian:${NC}"
+        echo -e "${CYAN}1.${NC} Run: ${WHITE}proot-distro install debian${NC}"
+        echo -e "${CYAN}2.${NC} Or run: ${WHITE}bash scripts/install_deepseek.sh${NC}"
         return 1
     fi
     
+    print_status "success" "Installation check passed!"
     return 0
 }
 
@@ -320,17 +362,35 @@ show_system_info() {
     echo -e "${WHITE}Termux Information:${NC}"
     echo -e "${CYAN}  Version:${NC} $(pkg list-installed | grep termux-api || echo "Not installed")"
     echo -e "${CYAN}  Architecture:${NC} $(uname -m)"
+    echo -e "${CYAN}  PATH:${NC} $PATH"
+    echo ""
+    
+    echo -e "${WHITE}PRoot-Distro Information:${NC}"
+    if command -v proot-distro &> /dev/null; then
+        echo -e "${CYAN}  Location:${NC} $(which proot-distro)"
+        echo -e "${CYAN}  Version:${NC} $(proot-distro --version 2>/dev/null || echo "Version info not available")"
+    else
+        echo -e "${RED}  Not found in PATH${NC}"
+    fi
     echo ""
     
     echo -e "${WHITE}Available Linux Distributions:${NC}"
-    proot-distro list
+    if command -v proot-distro &> /dev/null; then
+        proot-distro list
+    else
+        echo "Cannot list distributions - proot-distro not found"
+    fi
     echo ""
     
     echo -e "${WHITE}Ollama Models:${NC}"
-    if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
-        proot-distro login debian --shared-tmp -- bash -c "ollama list 2>/dev/null || echo 'No models found'"
+    if command -v proot-distro &> /dev/null; then
+        if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+            proot-distro login debian --shared-tmp -- bash -c "ollama list 2>/dev/null || echo 'No models found'"
+        else
+            echo "Ollama not installed in Debian"
+        fi
     else
-        echo "Ollama not installed"
+        echo "Cannot check Ollama - proot-distro not found"
     fi
     
     echo ""
@@ -344,9 +404,12 @@ main_menu() {
         
         # Check installation status
         if ! check_installation; then
-            echo -e "${RED}${CROSS_MARK} Installation incomplete. Please run the installation script first.${NC}"
             echo ""
-            echo -e "${YELLOW}Run: ${CYAN}bash scripts/install_deepseek.sh${NC}"
+            echo -e "${YELLOW}${STAR} Troubleshooting Steps:${NC}"
+            echo -e "${CYAN}1.${NC} Update Termux: ${WHITE}pkg update && pkg upgrade -y${NC}"
+            echo -e "${CYAN}2.${NC} Install proot-distro: ${WHITE}pkg install proot-distro -y${NC}"
+            echo -e "${CYAN}3.${NC} Run installation script: ${WHITE}bash scripts/install_deepseek.sh${NC}"
+            echo -e "${CYAN}4.${NC} Check PATH: ${WHITE}echo \$PATH${NC}"
             echo ""
             read -p "$(echo -e "${GREEN}Press Enter to exit...${NC}")"
             exit 1

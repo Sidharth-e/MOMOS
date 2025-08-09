@@ -2,6 +2,18 @@
 
 A beautiful and modern UI implementation for running multiple AI models locally on Termux (Android), including DeepSeek R1, Llama 3, Mistral, and more.
 
+## 📋 Table of Contents
+
+- [Features](#-features)
+- [Requirements](#-requirements)
+- [Installation Guide](#-installation-guide)
+- [Usage Instructions](#-usage-instructions)
+- [Troubleshooting](#-troubleshooting)
+- [Common Issues](#-common-issues)
+- [Advanced Configuration](#-advanced-configuration)
+- [Performance Tips](#-performance-tips)
+- [FAQ](#-faq)
+
 ## ✨ Features
 
 - **Modern Terminal UI** with colors, emojis, and progress bars
@@ -13,6 +25,7 @@ A beautiful and modern UI implementation for running multiple AI models locally 
 - **Error Handling** with graceful fallbacks
 - **Server Management** for Ollama backend
 - **System Information** display
+- **Automatic Path Detection** for better compatibility
 
 ## 🎨 UI Elements
 
@@ -23,6 +36,7 @@ A beautiful and modern UI implementation for running multiple AI models locally 
 - **Interactive menus** with numbered options
 - **Clear visual hierarchy** for better readability
 - **Current model display** in header
+- **Enhanced error messages** with troubleshooting steps
 
 ## 🤖 Supported Models
 
@@ -41,44 +55,106 @@ A beautiful and modern UI implementation for running multiple AI models locally 
 
 ## 📱 Requirements
 
-- **Termux** (Android terminal emulator)
+### Minimum Requirements
 - **Android 7.0+** (API level 24+)
-- **Internet connection** for downloads
-- **At least 2GB free storage** for models
-- **3GB+ RAM** recommended for larger models
+- **Termux** (latest version from F-Droid or GitHub)
+- **2GB free storage** for basic models
+- **3GB RAM** minimum
 
-## 🚀 Quick Start
+### Recommended Requirements
+- **Android 10+** for better performance
+- **4GB+ RAM** for larger models
+- **5GB+ free storage** for multiple models
+- **Snapdragon 8 Gen 1+** or equivalent CPU
 
-### 1. Install DeepSeek R1
+### Storage Requirements by Model
+- **1.5B models**: ~800MB
+- **7B models**: ~4GB
+- **8B models**: ~5GB
+- **14B models**: ~8GB
+- **32B models**: ~20GB
+- **70B models**: ~40GB
+
+## 🚀 Installation Guide
+
+### Step 1: Install Termux
+
+**⚠️ IMPORTANT: Do NOT install Termux from Google Play Store**
+
+1. **Download from F-Droid (Recommended):**
+   ```bash
+   # Install F-Droid first, then search for "Termux"
+   # Or download directly: https://f-droid.org/packages/com.termux/
+   ```
+
+2. **Download from GitHub:**
+   ```bash
+   # Visit: https://github.com/termux/termux-app/releases
+   # Download the latest APK for your architecture
+   ```
+
+3. **Install the APK** and grant necessary permissions
+
+### Step 2: Setup Termux
 
 ```bash
-# Make the script executable
+# Update packages
+pkg update && pkg upgrade -y
+
+# Install essential tools
+pkg install git wget curl -y
+
+# Setup storage access
+termux-setup-storage
+```
+
+### Step 3: Clone/Download Scripts
+
+```bash
+# Option 1: Clone repository
+git clone https://github.com/yourusername/MOMOS.git
+cd MOMOS
+
+# Option 2: Download manually
+# Download the scripts folder to your device
+```
+
+### Step 4: Make Scripts Executable
+
+```bash
+# Make installation script executable
 chmod +x scripts/install_deepseek.sh
 
-# Run the installation
+# Make launcher executable
+chmod +x scripts/deepseek_launcher.sh
+```
+
+### Step 5: Run Installation
+
+```bash
+# Run the installation script
 bash scripts/install_deepseek.sh
 ```
 
-The installation script will:
-- Update Termux packages
-- Install PRoot-Distro
-- Install Debian 12
-- Install Ollama
-- Download DeepSeek R1 1.5B model
+**Installation Process:**
+1. Updates Termux packages
+2. Installs PRoot-Distro
+3. Installs Debian 12
+4. Installs Ollama
+5. Downloads DeepSeek R1 1.5B model
 
-### 2. Launch the Multi-Model Launcher
+**Expected Time:** 10-30 minutes depending on internet speed
+
+## 🎯 Usage Instructions
+
+### Starting the Launcher
 
 ```bash
-# Make the launcher executable
-chmod +x scripts/deepseek_launcher.sh
-
 # Run the launcher
 bash scripts/deepseek_launcher.sh
 ```
 
-## 🎯 Launcher Features
-
-The enhanced launcher provides a beautiful interface with:
+### Launcher Menu Options
 
 1. **Start AI Chat** - Begin chatting with your selected model
 2. **Select/Download Model** - Choose from various AI models
@@ -88,15 +164,15 @@ The enhanced launcher provides a beautiful interface with:
 6. **System Information** - View Termux and system details
 7. **Exit** - Clean exit from the launcher
 
-## 🔄 Model Selection & Management
+### Model Selection
 
-### Choosing a Model
 - **Pre-built options** for popular models
 - **Custom model names** for any Ollama model
 - **Size recommendations** based on device capabilities
 - **Automatic download** after selection
 
 ### Model Management
+
 - **List installed models** with sizes
 - **Remove unused models** to free storage
 - **Model information** and details
@@ -121,84 +197,288 @@ ollama run llama3:8b           # Llama 3 model
 ollama run mistral:7b          # Mistral model
 ```
 
-## 🎨 UI Customization
+## 🛠️ Troubleshooting
 
-The scripts use ANSI color codes and Unicode characters. You can customize:
+### Common Installation Issues
 
-- **Colors**: Modify the color variables at the top of each script
-- **Symbols**: Change Unicode characters for different visual styles
-- **Layout**: Adjust box-drawing characters for different terminal widths
-- **Model defaults**: Change the default model in the launcher
+#### 1. "Permission denied" errors
+```bash
+# Solution: Make scripts executable
+chmod +x scripts/*.sh
 
-## 📊 Progress Indicators
+# Check permissions
+ls -la scripts/
+```
 
-- **Step-by-step progress** with clear headers
-- **Progress bars** for package updates
-- **Animated dots** for long installations
-- **Download progress** for model downloads
-- **Status messages** for each operation
+#### 2. "Package not found" errors
+```bash
+# Solution: Update Termux packages
+pkg update && pkg upgrade -y
 
-## 🛡️ Error Handling
+# Refresh package lists
+pkg update
+```
 
-- **Graceful fallbacks** for failed operations
-- **Clear error messages** with visual indicators
-- **Installation verification** before proceeding
-- **Termux environment detection**
-- **Model availability checks**
+#### 3. "Storage access denied"
+```bash
+# Solution: Setup storage permissions
+termux-setup-storage
 
-## 🔍 Troubleshooting
+# Grant permissions in Android Settings > Apps > Termux > Permissions
+```
 
-### Common Issues
+#### 4. "Out of storage space"
+```bash
+# Check available space
+df -h
 
-1. **"Permission denied"** - Make scripts executable with `chmod +x`
-2. **"Not found" errors** - Ensure you're running in Termux
-3. **Installation fails** - Check internet connection and storage space
-4. **Model not found** - Use the launcher to download models
-5. **Out of memory** - Choose smaller models (1.5B, 7B, 8B)
+# Clear Termux cache
+pkg clean
 
-### Model Selection Tips
+# Remove unused packages
+pkg autoremove
+```
 
-- **Start with 1.5B/7B models** for mobile devices
-- **8B models** offer good balance of quality and performance
-- **14B+ models** require significant RAM and storage
-- **Use model management** to remove unused models
+### Launcher Issues
 
-### Debug Mode
+#### 1. "proot-distro not found" error
 
-For troubleshooting, you can modify the scripts to show verbose output by removing `> /dev/null 2>&1` from commands.
+**This is the most common issue!** Here are multiple solutions:
 
-## 📱 Termux Compatibility
+**Solution A: Check if proot-distro is installed**
+```bash
+# Check if proot-distro exists
+which proot-distro
 
-- **Tested on**: Android 10+ with Termux
-- **Architecture**: ARM64, ARM32, x86_64
-- **Storage**: Requires at least 2GB free space
-- **Memory**: Minimum 3GB RAM recommended
-- **Models**: All Ollama-supported models
+# If not found, install it
+pkg install proot-distro -y
+```
 
-## 🎉 Success Indicators
+**Solution B: Check PATH variable**
+```bash
+# View current PATH
+echo $PATH
 
-- ✅ Green checkmarks for completed steps
-- 🎉 Celebration emojis for completion
-- 🚀 Rocket emojis for successful launches
-- 💬 Chat bubbles for interactive elements
-- 🤖 Robot emojis for model selection
+# Check if proot-distro is in common locations
+ls -la /data/data/com.termux/files/usr/bin/proot-distro
+ls -la $HOME/.local/bin/proot-distro
+```
+
+**Solution C: Reinstall proot-distro**
+```bash
+# Remove and reinstall
+pkg remove proot-distro -y
+pkg install proot-distro -y
+
+# Verify installation
+proot-distro --help
+```
+
+**Solution D: Manual path addition**
+```bash
+# Add to PATH temporarily
+export PATH=$PATH:/data/data/com.termux/files/usr/bin
+
+# Add to PATH permanently (add to ~/.bashrc)
+echo 'export PATH=$PATH:/data/data/com.termux/files/usr/bin' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### 2. "Debian not found" error
+
+```bash
+# Check available distributions
+proot-distro list
+
+# Install Debian if not present
+proot-distro install debian
+
+# Verify installation
+proot-distro list | grep debian
+```
+
+#### 3. "Ollama not found" error
+
+```bash
+# Enter Debian environment
+proot-distro login debian
+
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Verify installation
+ollama --version
+```
+
+### Performance Issues
+
+#### 1. Slow model loading
+```bash
+# Check available RAM
+free -h
+
+# Use smaller models for mobile devices
+# Recommended: 1.5B, 7B, or 8B models
+```
+
+#### 2. High memory usage
+```bash
+# Monitor memory usage
+htop
+
+# Kill unnecessary processes
+pkill -f ollama
+```
+
+#### 3. Storage space issues
+```bash
+# Check storage usage
+df -h
+
+# Remove unused models
+proot-distro login debian -- bash -c "ollama list"
+proot-distro login debian -- bash -c "ollama rm model_name"
+```
+
+## 🔍 Advanced Configuration
+
+### Customizing the Launcher
+
+#### Change Default Model
+```bash
+# Edit the launcher script
+nano scripts/deepseek_launcher.sh
+
+# Find this line and change the model:
+CURRENT_MODEL="deepseek-r1:1.5b"
+```
+
+#### Custom Color Scheme
+```bash
+# Edit color variables at the top of scripts
+# Available colors: RED, GREEN, YELLOW, BLUE, PURPLE, CYAN, WHITE
+```
+
+#### Add Custom Models
+```bash
+# Edit the show_available_models function
+# Add your preferred models to the list
+```
+
+### Environment Variables
+
+```bash
+# Set custom Ollama server URL
+export OLLAMA_HOST=0.0.0.0:11434
+
+# Set custom model path
+export OLLAMA_MODELS=/path/to/models
+
+# Add to ~/.bashrc for persistence
+echo 'export OLLAMA_HOST=0.0.0.0:11434' >> ~/.bashrc
+```
+
+### Performance Optimization
+
+#### For Mobile Devices
+```bash
+# Use smaller models (1.5B, 7B, 8B)
+# Close other apps to free RAM
+# Enable battery optimization for Termux
+```
+
+#### For High-End Devices
+```bash
+# Use larger models (14B, 32B, 70B)
+# Increase swap space if needed
+# Monitor temperature during long sessions
+```
+
+## 📊 Performance Tips
+
+### Model Selection Guidelines
+
+| Device Type | RAM | Recommended Models | Performance |
+|-------------|-----|-------------------|-------------|
+| **Low-end** | 2-3GB | 1.5B, 7B | Fast, basic quality |
+| **Mid-range** | 4-6GB | 8B, 14B | Balanced, good quality |
+| **High-end** | 8GB+ | 32B, 70B | Slow, excellent quality |
+
+### Memory Management
+
+```bash
+# Monitor memory usage
+watch -n 1 'free -h'
+
+# Clear memory cache
+echo 3 > /proc/sys/vm/drop_caches
+
+# Restart Ollama server if memory gets high
+proot-distro login debian -- bash -c "pkill ollama && ollama serve"
+```
+
+### Storage Optimization
+
+```bash
+# Regular cleanup
+proot-distro login debian -- bash -c "ollama list"
+proot-distro login debian -- bash -c "ollama rm unused_model"
+
+# Compress models (if supported)
+# Some models support quantization for smaller size
+```
+
+## ❓ FAQ
+
+### Q: Why is the launcher showing "proot-distro not found"?
+**A:** This is usually a PATH issue. Try:
+1. `pkg install proot-distro -y`
+2. Check if it's in your PATH: `echo $PATH`
+3. Restart Termux completely
+
+### Q: How much storage do I need?
+**A:** Minimum 2GB for basic models, 5GB+ recommended for multiple models.
+
+### Q: Can I run multiple models at once?
+**A:** Yes, but each model uses significant RAM. Use smaller models for mobile devices.
+
+### Q: Why is the model loading slowly?
+**A:** Larger models require more RAM and processing power. Use 1.5B or 7B models for faster loading.
+
+### Q: How do I update models?
+**A:** Use the launcher's "Select/Download Model" option or manually run `ollama pull model_name`.
+
+### Q: Can I use this without internet?
+**A:** After initial installation and model download, you can use models offline.
+
+### Q: Why is Termux crashing?
+**A:** Usually due to insufficient RAM. Use smaller models and close other apps.
+
+### Q: How do I backup my models?
+**A:** Models are stored in the Debian environment. You can copy the Ollama directory or use the launcher's model management.
 
 ## 🔄 Updates
 
-To update your installation:
-
+### Updating Termux
 ```bash
-# Update Termux packages
-apt update && apt upgrade -y
+pkg update && pkg upgrade -y
+```
 
-# Update Debian packages
+### Updating Debian
+```bash
 proot-distro login debian -- bash -c "apt update && apt upgrade -y"
+```
 
-# Update Ollama
+### Updating Ollama
+```bash
 proot-distro login debian -- bash -c "curl -fsSL https://ollama.ai/install.sh | sh"
+```
 
-# Update models (optional)
-proot-distro login debian -- bash -c "ollama pull deepseek-r1:1.5b"
+### Updating Models
+```bash
+# Use the launcher's model selection
+# Or manually:
+proot-distro login debian -- bash -c "ollama pull model_name"
 ```
 
 ## 📄 License
@@ -213,9 +493,22 @@ Contributions are welcome! Areas for improvement:
 - Performance optimizations for mobile devices
 - Better error handling and recovery
 - Model performance benchmarking
+- Additional troubleshooting guides
+
+## 📞 Support
+
+If you're still having issues:
+
+1. **Check the troubleshooting section** above
+2. **Run the system information** option in the launcher
+3. **Check Termux logs**: `logcat | grep termux`
+4. **Verify your Android version** and Termux compatibility
+5. **Try a fresh Termux installation** if all else fails
 
 ---
 
 **Enjoy your modern multi-model AI experience on Termux! 🧠✨🤖**
+
+*If this README helped you, consider giving it a star! ⭐*
 
 
