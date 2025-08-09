@@ -22,7 +22,6 @@ STAR="★"
 GEAR="⚙️"
 DOWNLOAD="📥"
 
-# Print status messages
 print_status() {
     local status=$1
     local message=$2
@@ -44,61 +43,63 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 sleep 1
 
-# Step 1: Update Termux Packages
+# Step 1: Check if Debian is installed
+if proot-distro list | grep -q 'debian.*installed'; then
+    print_status success "Debian is already installed."
+    echo -e "${YELLOW}You can run it with:${NC}"
+    echo "  proot-distro login debian"
+    echo "Then inside Debian:"
+    echo "  ollama run <model-name>"
+    exit 0
+fi
+
+# Step 2: Update Termux Packages
 print_status step "Updating Termux packages..."
 apt update && apt upgrade -y
 
-# Step 2: Install PRoot-Distro
+# Step 3: Install PRoot-Distro
 print_status step "Installing proot-distro..."
 pkg install proot-distro -y
 
-# Step 3: Install Debian 12
+# Step 4: Install Debian 12
 print_status step "Installing Debian 12..."
 proot-distro install debian
 
-# Step 4: Choose model
+# Step 5: Model selection (basic list)
 echo -e "\n${YELLOW}Select a model to install:${NC}"
 echo "1) deepseek-r1:1.5b"
 echo "2) deepseek-r1:7b"
 echo "3) deepseek-r1:14b"
 echo "4) deepseek-r1:32b"
-echo "5) Enter custom model tag"
+echo "5) Custom model"
 read -p "Enter choice [1-5]: " choice
-
 case $choice in
     1) MODEL_TAG="deepseek-r1:1.5b" ;;
     2) MODEL_TAG="deepseek-r1:7b" ;;
     3) MODEL_TAG="deepseek-r1:14b" ;;
     4) MODEL_TAG="deepseek-r1:32b" ;;
-    5) read -p "Enter full model tag (e.g., deepseek-r1:custom): " MODEL_TAG ;;
-    *) echo -e "${RED}Invalid choice, defaulting to deepseek-r1:1.5b${NC}"; MODEL_TAG="deepseek-r1:1.5b" ;;
+    5) read -p "Enter full model tag: " MODEL_TAG ;;
+    *) MODEL_TAG="deepseek-r1:1.5b" ;;
 esac
 
-print_status info "Model selected: $MODEL_TAG"
-
-# Step 5: Enter Debian and install dependencies
+# Step 6: Enter Debian and install Ollama + model
 print_status step "Setting up inside Debian..."
 proot-distro login debian --shared-tmp -- bash -c "
     set -e
     echo '>>> Updating Debian packages...'
     apt update && apt upgrade -y
-
     echo '>>> Installing tmux & curl...'
     apt install tmux curl -y
-
     echo '>>> Installing Ollama...'
     curl -fsSL https://ollama.ai/install.sh | sh
-
-    echo '>>> Starting Ollama server in background tmux session...'
+    echo '>>> Starting Ollama server...'
     tmux new-session -d -s ollama_server 'ollama serve'
-
     echo '>>> Downloading model: $MODEL_TAG'
     ollama pull $MODEL_TAG
-
-    echo 'Setup complete inside Debian!'
+    echo 'Setup complete!'
 "
 
-echo -e "${GREEN}=== Installation Complete ===${NC}"
-echo "To run the model, use:"
+print_status success "Installation Complete"
+echo "To run the model:"
 echo "  proot-distro login debian"
 echo "  ollama run $MODEL_TAG"
