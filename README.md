@@ -112,7 +112,7 @@ termux-setup-storage
 
 ```bash
 # Option 1: Clone repository
-git clone https://github.com/yourusername/MOMOS.git
+git clone https://github.com/Sidharth-e/MOMOS.git
 cd MOMOS
 
 # Option 2: Download manually
