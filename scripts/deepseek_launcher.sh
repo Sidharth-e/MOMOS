@@ -192,75 +192,39 @@ check_installation() {
 
 # Function to start Ollama server
 start_ollama_server() {
-    print_status "step" "Starting Ollama server..."
-    
-    # Check if server is already running by trying to connect to it
-    if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
-        print_status "success" "Ollama server is already running!"
-        print_status "info" "You can attach to it with: tmux attach-session -t ollama_server"
-        print_status "info" "Press CTRL+B then D to detach and leave it running"
+    echo "[*] Ensuring Ollama server is running..."
+
+    # Step 1: Check if it's already running
+    if proot-distro login debian -- ss -tuln 2>/dev/null | grep -q ':11434'; then
+        echo "[OK] Ollama server already running."
         return 0
-    else
-        print_status "info" "Starting Ollama server in background TMUX session..."
-        
-        # Method 1: Try direct TMUX session creation
-        if proot-distro login debian -- script -q -c "tmux new-session -d -s ollama_server 'ollama serve'" /dev/null; then
-            print_status "success" "Ollama server started successfully in TMUX session!"
-            print_status "info" "Session name: ollama_server"
-            print_status "info" "To attach: tmux attach-session -t ollama_server"
-            print_status "info" "To detach: Press CTRL+B then D"
+    fi
+
+    echo "[*] Ollama server not running. Starting it now..."
+
+    # Step 2: Kill any dead tmux session with same name
+    proot-distro login debian -- tmux kill-session -t ollama_server 2>/dev/null
+
+    # Step 3: Start Ollama in tmux inside Debian using script for PTY
+    proot-distro login debian -- script -q -c \
+        "tmux new-session -d -s ollama_server 'ollama serve'" /dev/null
+
+    echo "[*] Waiting for Ollama to start on port 11434..."
+
+    # Step 4: Wait until Ollama is actually listening (max 15s)
+    for i in $(seq 1 15); do
+        if proot-distro login debian -- ss -tuln 2>/dev/null | grep -q ':11434'; then
+            echo "[OK] Ollama server started successfully in TMUX session!"
+            echo "    To attach: proot-distro login debian -- tmux attach -t ollama_server"
+            echo "    To detach: Press CTRL+B then D"
             return 0
         fi
-        
-        # Method 2: Try with temporary script if direct method fails
-        print_status "warning" "Direct TMUX creation failed. Trying alternative method..."
-        
-        # Create a temporary script to start the server
-        cat > /tmp/start_ollama.sh << 'EOF'
-#!/bin/bash
-# Start Ollama server in TMUX session
-if ! tmux has-session -t ollama_server 2>/dev/null; then
-    tmux new-session -d -s ollama_server 'ollama serve'
-    echo "Ollama server started in TMUX session: ollama_server"
-else
-    echo "Ollama server session already exists"
-fi
-EOF
-        
-        # Make it executable and run it in Debian
-        chmod +x /tmp/start_ollama.sh
-        if proot-distro login debian -- bash -c "bash /tmp/start_ollama.sh"; then
-            # Clean up temp file
-            rm -f /tmp/start_ollama.sh
-            
-            # Wait a moment for server to start
-            sleep 3
-            
-            # Verify server started successfully
-            if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
-                print_status "success" "Ollama server started successfully in TMUX session!"
-                print_status "info" "Session name: ollama_server"
-                print_status "info" "To attach: tmux attach-session -t ollama_server"
-                print_status "info" "To detach: Press CTRL+B then D"
-                return 0
-            fi
-        fi
-        
-        # Clean up temp file if it still exists
-        rm -f /tmp/start_ollama.sh
-        
-        # If all methods failed, give manual instructions
-        print_status "error" "Failed to start Ollama server automatically!"
-        echo ""
-        echo -e "${YELLOW}${STAR} Manual Start Instructions:${NC}"
-        echo -e "${CYAN}1.${NC} Enter Debian environment: ${WHITE}proot-distro login debian${NC}"
-        echo -e "${CYAN}2.${NC} Start TMUX session: ${WHITE}tmux new-session -d -s ollama_server 'ollama serve'${NC}"
-        echo -e "${CYAN}3.${NC} Verify it's running: ${WHITE}tmux list-sessions${NC}"
-        echo -e "${CYAN}4.${NC} Attach to monitor: ${WHITE}tmux attach-session -t ollama_server${NC}"
-        echo ""
-        echo -e "${YELLOW}${STAR} Alternative: Use the launcher's Server Management (Option 3) to try again${NC}"
-        return 1
-    fi
+        sleep 1
+    done
+
+    echo "[ERROR] Ollama server failed to start. Check logs with:"
+    echo "    proot-distro login debian -- tmux attach -t ollama_server"
+    return 1
 }
 
 # Function to check and ensure Ollama server is running
