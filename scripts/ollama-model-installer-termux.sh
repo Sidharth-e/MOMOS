@@ -174,7 +174,7 @@ main_installation() {
         curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
         
         echo '${GREEN}${CHECK_MARK}${NC} Starting Ollama server in background...'
-        tmux new-session -d -s ollama_server 'ollama serve' > /dev/null 2>&1
+        tmux new-session -d -s ollama_server 'ollama serve'
         
         echo '${GREEN}${CHECK_MARK}${NC} Downloading model: ${MODEL_NAME}...'
         ollama pull ${MODEL_NAME} > /dev/null 2>&1
