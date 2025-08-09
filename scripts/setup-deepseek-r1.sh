@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # MOMOS - Mobile Open-source Model Operating Script
-# Lightweight setup script that avoids PyTorch completely
+# DeepSeek R1 setup script that avoids PyTorch completely
 
 set -e  # Exit on any error
 
@@ -476,8 +476,8 @@ MOMOS_TEMP_DIR=temp/
 MOMOS_CONFIG_DIR=config/
 
 # Model settings
-DEFAULT_MODEL=phi-2-ggml
-MAX_MEMORY_USAGE=0.5
+DEFAULT_MODEL=deepseek-r1-instruct-ggml
+MAX_MEMORY_USAGE=0.6
 QUANTIZATION=int4
 
 # Logging
@@ -557,7 +557,7 @@ EOF
 main() {
     echo -e "${GREEN}"
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║              MOMOS Lightweight Setup Script                 ║"
+    echo "║              MOMOS DeepSeek R1 Setup Script                 ║"
     echo "║         Mobile Open-source Model Operating Script           ║"
     echo "║                    (No PyTorch!)                            ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
@@ -575,12 +575,12 @@ main() {
     
     echo
     echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}🎉 MOMOS Lightweight setup completed! 🎉${NC}"
+    echo -e "${GREEN}🎉 MOMOS DeepSeek R1 setup completed! 🎉${NC}"
     echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
     echo
     echo "✅ No PyTorch needed!"
-    echo "📱 Mobile-optimized GGML models"
-    echo "⚡ Fast inference with low memory usage"
+    echo "📱 DeepSeek R1 optimized for mobile Termux"
+    echo "⚡ Fast inference with GGML optimization"
     echo
     
     # Termux-specific instructions
@@ -604,8 +604,8 @@ main() {
     
     echo "Next steps:"
     echo "1. Activate virtual environment: source venv/bin/activate"
-    echo "2. View lightweight models: cat config/models-lightweight.json"
-    echo "3. Install a model: ./scripts/install-lightweight-model.sh phi-2-ggml"
+    echo "2. View DeepSeek R1 configuration: cat config/models-lightweight.json"
+echo "3. Install DeepSeek R1 model: ./scripts/install-lightweight-model.sh deepseek-r1-instruct-ggml"
     echo "4. Run inference: ./scripts/run-ggml-inference.sh \"Hello!\""
     echo
     echo "See README.md for detailed instructions"

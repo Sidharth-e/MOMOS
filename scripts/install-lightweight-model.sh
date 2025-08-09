@@ -33,12 +33,9 @@ if [[ $# -eq 0 ]]; then
     echo "Usage: $0 <model-id>"
     echo ""
     echo "Available models:"
-    echo "  tiny-llama-ggml     - TinyLlama 0.7GB (fastest, smallest)"
-    echo "  phi-2-ggml         - Phi-2 1.4GB (good quality, medium speed)"
-    echo "  gpt4all-j-ggml     - GPT4All-J 1.2GB (balanced)"
-    echo "  llama-2-7b-ggml    - Llama-2 7B 4.0GB (best quality, slower)"
+    echo "  deepseek-r1-instruct-ggml  - DeepSeek R1 Instruct 1.8GB (optimized for Termux)"
     echo ""
-    echo "Example: $0 tiny-llama-ggml"
+    echo "Example: $0 deepseek-r1-instruct-ggml"
     exit 1
 fi
 

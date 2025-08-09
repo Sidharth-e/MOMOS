@@ -1,15 +1,14 @@
-# MOMOS (Mobile Open-source Model Operating Script) - DeepSeek R1 Edition
+# MOMOS - DeepSeek R1 for Termux
 
 A streamlined solution for running DeepSeek R1 AI model on Android devices using Termux, optimized for mobile performance.
 
 ## 🎯 What is MOMOS?
 
 MOMOS is a collection of shell scripts designed specifically for Termux on Android to:
-- Set up lightweight AI model environments (no PyTorch needed!)
-- Configure models for mobile device optimization
+- Set up DeepSeek R1 model environment (no PyTorch needed!)
+- Configure the model for mobile device optimization
 - Run inference with minimal setup hassle
-- Troubleshoot common Termux issues
-- Provide fallback methods when ML libraries fail
+- Provide a focused, single-model solution
 
 ## 🚀 Features
 
@@ -71,6 +70,18 @@ source venv/bin/activate
 ./scripts/run-ggml-inference.sh "Hello, how are you?"
 ```
 
+## 📊 DeepSeek R1 Model Specifications
+
+| Feature | Specification | Notes |
+|---------|---------------|-------|
+| **Model** | DeepSeek R1 Instruct | Latest instruction-tuned model |
+| **Size** | 1.8GB | Optimized for mobile devices |
+| **Memory** | 2.0GB | Efficient memory usage |
+| **Format** | GGML Quantized | Best mobile performance |
+| **Context** | 2048 tokens | Good conversation length |
+| **Quality** | ⭐⭐⭐⭐⭐ | High-quality responses |
+| **Speed** | ⚡⚡⚡ | Fast inference on mobile |
+
 ## 🔧 Setup Options
 
 ### DeepSeek R1 Setup
@@ -87,25 +98,11 @@ source venv/bin/activate
 - ✅ **High quality** - DeepSeek R1 is a powerful model
 - ✅ **Context aware** - supports up to 2048 tokens
 
-
-
 ### Troubleshooting
 ```bash
 # Run the troubleshooting script if you have issues
 ./scripts/termux-troubleshoot.sh
 ```
-
-## 📊 DeepSeek R1 Model Specifications
-
-| Feature | Specification | Notes |
-|---------|---------------|-------|
-| **Model** | DeepSeek R1 Instruct | Latest instruction-tuned model |
-| **Size** | 1.8GB | Optimized for mobile devices |
-| **Memory** | 2.0GB | Efficient memory usage |
-| **Format** | GGML Quantized | Best mobile performance |
-| **Context** | 2048 tokens | Good conversation length |
-| **Quality** | ⭐⭐⭐⭐⭐ | High-quality responses |
-| **Speed** | ⚡⚡⚡ | Fast inference on mobile |
 
 ## ⚠️ What to Expect in Termux
 
@@ -220,7 +217,7 @@ MOMOS/
 # Edit .env file to customize:
 MOMOS_MODELS_DIR=./models/
 MOMOS_LOG_LEVEL=INFO
-MOMOS_DEFAULT_MODEL=tiny-llama-ggml
+MOMOS_DEFAULT_MODEL=deepseek-r1-instruct-ggml
 ```
 
 ### DeepSeek R1 Configuration
@@ -237,17 +234,13 @@ Contributions are welcome! Please:
 3. Make your changes
 4. Submit a pull request
 
-## 📖 Additional Documentation
-
-- **[DeepSeek R1 Setup Guide](README-DEEPSEEK-R1.md)** - Detailed instructions for DeepSeek R1 setup
-- **[Termux Troubleshooting](scripts/termux-troubleshoot.sh)** - Common issues and solutions
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
+- DeepSeek team for the R1 model
 - Open-source model developers
 - Termux development team
 - Mobile AI community
