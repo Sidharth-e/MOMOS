@@ -2,7 +2,6 @@
 
 # DeepSeek R1 Installation Script for Termux (Debian via Proot-Distro + Ollama)
 # Modern UI with colors, progress bars, and interactive elements
-# Fixed model selection bug for Termux interactive input
 # Tested for DeepSeek R1 1.5B model on Android with Termux
 
 set -e
@@ -84,24 +83,6 @@ print_step_footer() {
     echo ""
 }
 
-# Function to start Ollama server inside Debian
-start_ollama_server() {
-    print_step_header "S" "Starting Ollama Server"
-
-    proot-distro login debian --shared-tmp -- bash -c "
-        if tmux has-session -t ollama_server 2>/dev/null; then
-            echo '${YELLOW}${STAR}${NC} Ollama server already running in TMUX session.'
-        else
-            echo '${GREEN}${CHECK_MARK}${NC} Starting Ollama server...'
-            tmux new-session -d -s ollama_server 'ollama serve'
-            echo '${GREEN}${CHECK_MARK}${NC} Ollama server started.'
-        fi
-    "
-
-    print_status "success" "Ollama server is ready!"
-    print_step_footer
-}
-
 # Main installation function
 main_installation() {
     print_header
@@ -110,6 +91,7 @@ main_installation() {
     print_status "info" "This will install Debian via Proot-Distro, Ollama, and DeepSeek R1."
     echo ""
     
+    # Confirmation
     read -p "$(echo -e "${YELLOW}Do you want to continue? (y/N): ${NC}")" -n 1 -r
     echo ""
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -160,6 +142,7 @@ main_installation() {
     print_step_header "4" "Configuring Debian Environment"
     print_status "step" "Setting up Debian and installing dependencies..."
 
+    # Ask user to select Ollama model
     echo -e "${YELLOW}Select the Ollama model to install:${NC}"
     echo "1) deepseek-r1:1.5b   (Smaller, faster)"
     echo "2) deepseek-r1:7b     (Balanced)"
@@ -178,15 +161,25 @@ main_installation() {
         *) print_status "warning" "Invalid choice, defaulting to deepseek-r1:1.5b"
            MODEL_NAME="deepseek-r1:1.5b" ;;
     esac
-
-    # Install inside Debian and download selected model
+    
     proot-distro login debian --shared-tmp -- bash -c "
         set -e
+        echo '${GREEN}${CHECK_MARK}${NC} Updating Debian packages...'
         apt update > /dev/null 2>&1 && apt upgrade -y > /dev/null 2>&1
+        
+        echo '${GREEN}${CHECK_MARK}${NC} Installing tmux & curl...'
         apt install tmux curl -y > /dev/null 2>&1
+        
+        echo '${GREEN}${CHECK_MARK}${NC} Installing Ollama...'
         curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
+        
+        echo '${GREEN}${CHECK_MARK}${NC} Starting Ollama server in background...'
         tmux new-session -d -s ollama_server 'ollama serve' > /dev/null 2>&1
-        ollama pull '$MODEL_NAME' > /dev/null 2>&1
+        
+        echo '${GREEN}${CHECK_MARK}${NC} Downloading model: ${MODEL_NAME}...'
+        ollama pull ${MODEL_NAME} > /dev/null 2>&1
+        
+        echo '${GREEN}${CHECK_MARK}${NC} Setup complete inside Debian!'
     "
     
     print_status "success" "Debian environment configured successfully!"
@@ -201,13 +194,6 @@ main_installation() {
     echo -e "${YELLOW}${STAR} Pro tip: Use 'tmux attach -t ollama_server' to manage the Ollama server${NC}"
     echo ""
     echo -e "${GREEN}${ROCKET} Enjoy your local AI assistant!${NC}"
-
-    read -p "$(echo -e "${YELLOW}Do you want to start the Ollama server now? (y/N): ${NC}")" -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        start_ollama_server
-        echo -e "${GREEN}${ROCKET} You can attach to the server with:${NC} tmux attach -t ollama_server"
-    fi
 }
 
 # Error handling
@@ -217,12 +203,6 @@ if [ ! -d "/data/data/com.termux" ]; then
     echo -e "${RED}${CROSS_MARK} This script is designed for Termux on Android.${NC}"
     echo -e "${RED}Please run this script in Termux.${NC}"
     exit 1
-fi
-
-# Mode handling: install or just start server
-if [[ "$1" == "start-server" ]]; then
-    start_ollama_server
-    exit 0
 fi
 
 main_installation
