@@ -105,13 +105,85 @@ check_installation() {
     
     # Check if Debian is installed
     print_status "step" "Checking Debian installation..."
-    if ! proot-distro list | grep -q "debian"; then
-        print_status "error" "Debian not found. Please run the installation script first."
+    
+    # Try to list distributions
+    local debian_found=false
+    
+    # Method 1: Check if proot-distro list works
+    if proot-distro list &> /dev/null; then
+        if proot-distro list | grep -q "debian"; then
+            debian_found=true
+            print_status "success" "Debian found via proot-distro list"
+        fi
+    fi
+    
+    # Method 2: Check if we can access Debian directly
+    if [ ! "$debian_found" = true ]; then
+        if proot-distro login debian --shared-tmp -- bash -c "echo 'Debian access test'" &> /dev/null; then
+            debian_found=true
+            print_status "success" "Debian found via direct access test"
+        fi
+    fi
+    
+    # Method 3: Check common Debian paths
+    if [ ! "$debian_found" = true ]; then
+        for path in "/data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/debian" "$HOME/.local/share/proot-distro/installed-rootfs/debian"; do
+            if [ -d "$path" ]; then
+                debian_found=true
+                print_status "success" "Debian found at: $path"
+                break
+            fi
+        done
+    fi
+    
+    if [ ! "$debian_found" = true ]; then
+        print_status "error" "Debian not found. Please install it first."
         echo ""
-        echo -e "${YELLOW}To install Debian:${NC}"
-        echo -e "${CYAN}1.${NC} Run: ${WHITE}proot-distro install debian${NC}"
-        echo -e "${CYAN}2.${NC} Or run: ${WHITE}bash scripts/install_deepseek.sh${NC}"
-        return 1
+        echo -e "${YELLOW}Options to install Debian:${NC}"
+        echo -e "${CYAN}1.${NC} Run the full installation script: ${WHITE}bash scripts/install_deepseek.sh${NC}"
+        echo -e "${CYAN}2.${NC} Install Debian manually: ${WHITE}proot-distro install debian${NC}"
+        echo -e "${CYAN}3.${NC} Check available distributions: ${WHITE}proot-distro list${NC}"
+        echo ""
+        
+        # Offer to install Debian automatically
+        read -p "$(echo -e "${YELLOW}Would you like to install Debian now? (y/N): ${NC}")" -n 1 -r
+        echo ""
+        
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_status "step" "Installing Debian..."
+            print_status "info" "This may take several minutes..."
+            
+            if proot-distro install debian; then
+                print_status "success" "Debian installed successfully!"
+                debian_found=true
+            else
+                print_status "error" "Failed to install Debian automatically."
+                echo -e "${YELLOW}Please try: ${WHITE}proot-distro install debian${NC}"
+                return 1
+            fi
+        else
+            return 1
+        fi
+    fi
+    
+    # Check if Ollama is available in Debian
+    print_status "step" "Checking Ollama installation..."
+    if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+        print_status "success" "Ollama found in Debian!"
+    else
+        print_status "warning" "Ollama not found in Debian. Installing now..."
+        
+        if proot-distro login debian --shared-tmp -- bash -c "
+            apt update > /dev/null 2>&1
+            apt install curl -y > /dev/null 2>&1
+            curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
+        "; then
+            print_status "success" "Ollama installed successfully!"
+        else
+            print_status "error" "Failed to install Ollama automatically."
+            echo -e "${YELLOW}Please run the installation script: ${WHITE}bash scripts/install_deepseek.sh${NC}"
+            return 1
+        fi
     fi
     
     print_status "success" "Installation check passed!"
@@ -397,6 +469,99 @@ show_system_info() {
     read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
 }
 
+# Function to run diagnostics
+run_diagnostics() {
+    print_status "step" "Running system diagnostics..."
+    echo ""
+    
+    echo -e "${WHITE}=== System Information ===${NC}"
+    echo -e "${CYAN}Termux Version:${NC} $(pkg list-installed | grep termux-api || echo "Not installed")"
+    echo -e "${CYAN}Architecture:${NC} $(uname -m)"
+    echo -e "${CYAN}Android Version:${NC} $(getprop ro.build.version.release 2>/dev/null || echo "Unknown")"
+    echo -e "${CYAN}Available Storage:${NC} $(df -h . | tail -1 | awk '{print $4}')"
+    echo -e "${CYAN}Available RAM:${NC} $(free -h | grep Mem | awk '{print $7}')"
+    echo ""
+    
+    echo -e "${WHITE}=== PRoot-Distro Status ===${NC}"
+    if command -v proot-distro &> /dev/null; then
+        echo -e "${GREEN}✓ PRoot-Distro found at: $(which proot-distro)${NC}"
+        echo -e "${CYAN}Version:${NC} $(proot-distro --version 2>/dev/null || echo "Version info not available")"
+        
+        echo -e "${CYAN}Available distributions:${NC}"
+        if proot-distro list &> /dev/null; then
+            proot-distro list
+        else
+            echo -e "${RED}✗ Cannot list distributions${NC}"
+        fi
+    else
+        echo -e "${RED}✗ PRoot-Distro not found in PATH${NC}"
+        echo -e "${CYAN}PATH:${NC} $PATH"
+        
+        # Check common locations
+        echo -e "${CYAN}Checking common locations:${NC}"
+        for path in "/data/data/com.termux/files/usr/bin/proot-distro" "/usr/bin/proot-distro" "$HOME/.local/bin/proot-distro"; do
+            if [ -f "$path" ]; then
+                echo -e "${GREEN}✓ Found at: $path${NC}"
+            else
+                echo -e "${RED}✗ Not found at: $path${NC}"
+            fi
+        done
+    fi
+    echo ""
+    
+    echo -e "${WHITE}=== Debian Status ===${NC}"
+    if command -v proot-distro &> /dev/null; then
+        # Check if Debian is listed
+        if proot-distro list | grep -q "debian"; then
+            echo -e "${GREEN}✓ Debian is listed in proot-distro${NC}"
+            
+            # Check if we can access it
+            if proot-distro login debian --shared-tmp -- bash -c "echo 'Debian access test successful'" &> /dev/null; then
+                echo -e "${GREEN}✓ Can access Debian environment${NC}"
+                
+                # Check Ollama
+                if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+                    echo -e "${GREEN}✓ Ollama is installed in Debian${NC}"
+                    echo -e "${CYAN}Ollama version:${NC} $(proot-distro login debian --shared-tmp -- bash -c "ollama --version 2>/dev/null || echo 'Version not available'")"
+                else
+                    echo -e "${RED}✗ Ollama not found in Debian${NC}"
+                fi
+            else
+                echo -e "${RED}✗ Cannot access Debian environment${NC}"
+            fi
+        else
+            echo -e "${RED}✗ Debian not found in proot-distro list${NC}"
+            
+            # Check common Debian paths
+            echo -e "${CYAN}Checking Debian paths:${NC}"
+            for path in "/data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/debian" "$HOME/.local/share/proot-distro/installed-rootfs/debian"; do
+                if [ -d "$path" ]; then
+                    echo -e "${GREEN}✓ Debian directory found at: $path${NC}"
+                else
+                    echo -e "${RED}✗ Debian directory not found at: $path${NC}"
+                fi
+            done
+        fi
+    else
+        echo -e "${RED}✗ Cannot check Debian - proot-distro not available${NC}"
+    fi
+    echo ""
+    
+    echo -e "${WHITE}=== Recommendations ===${NC}"
+    if ! command -v proot-distro &> /dev/null; then
+        echo -e "${YELLOW}1. Install proot-distro: ${WHITE}pkg install proot-distro -y${NC}"
+    elif ! proot-distro list | grep -q "debian"; then
+        echo -e "${YELLOW}1. Install Debian: ${WHITE}proot-distro install debian${NC}"
+    elif ! proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+        echo -e "${YELLOW}1. Install Ollama in Debian: ${WHITE}proot-distro login debian -- bash -c 'curl -fsSL https://ollama.ai/install.sh | sh'${NC}"
+    else
+        echo -e "${GREEN}✓ All components are properly installed!${NC}"
+    fi
+    
+    echo ""
+    read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
+}
+
 # Main menu function
 main_menu() {
     while true; do
@@ -424,10 +589,11 @@ main_menu() {
         echo -e "${CYAN}4.${NC} ${WHITE}${DOWNLOAD} Check Model Status${NC}"
         echo -e "${CYAN}5.${NC} ${WHITE}${SETTINGS} Manage Models${NC}"
         echo -e "${CYAN}6.${NC} ${WHITE}${SETTINGS} System Information${NC}"
-        echo -e "${CYAN}7.${NC} ${WHITE}${EXIT} Exit${NC}"
+        echo -e "${CYAN}7.${NC} ${WHITE}🔍 Run Diagnostics${NC}"
+        echo -e "${CYAN}8.${NC} ${WHITE}${EXIT} Exit${NC}"
         echo ""
         
-        read -p "$(echo -e "${YELLOW}Enter your choice (1-7): ${NC}")" choice
+        read -p "$(echo -e "${YELLOW}Enter your choice (1-8): ${NC}")" choice
         
         case $choice in
             1)
@@ -452,6 +618,9 @@ main_menu() {
                 show_system_info
                 ;;
             7)
+                run_diagnostics
+                ;;
+            8)
                 print_status "info" "Thank you for using DeepSeek R1 Launcher!"
                 echo -e "${GREEN}${ROCKET} Goodbye!${NC}"
                 exit 0
