@@ -1,6 +1,6 @@
 # MOMOS (Mobile Models Ollama Setup) - Modern AI for Termux 🚀
 
-A comprehensive and beautiful installer for running AI models locally on Termux (Android) using Debian, Ollama, and various AI models with an interactive setup process.
+A comprehensive installer for running AI models locally on Termux (Android) using Debian, Ollama, and various AI models with an interactive setup process.
 
 ## 📋 Table of Contents
 
@@ -9,17 +9,15 @@ A comprehensive and beautiful installer for running AI models locally on Termux 
 - [Installation Guide](#-installation-guide)
 - [Usage Instructions](#-usage-instructions)
 - [Troubleshooting](#-troubleshooting)
-- [FAQ](#-faq)
 
 ## ✨ Features
 
-- **Modern Terminal UI** with colors, emojis, and progress bars
+- **Modern Terminal UI** with colors, emojis, and progress indicators
 - **Interactive Installation** with step-by-step progress tracking
 - **Automatic Setup** of Debian 12 via PRoot-Distro
 - **Ollama Integration** with automatic installation and configuration
 - **Model Selection Menu** with popular AI models
 - **TMUX Integration** for background Ollama server management
-- **Beautiful Progress Indicators** with visual feedback
 - **Error Handling** with comprehensive error trapping
 - **Cross-Platform Compatibility** for Termux on Android
 
@@ -29,14 +27,15 @@ The installer provides a selection menu with these options:
 
 ### Pre-configured Models
 - **DeepSeek R1 1.5B** - Fast, lightweight (recommended for mobile)
-- **DeepSeek L 7B** - Balanced performance and quality
-- **Gemma 7B** - Google's efficient model
+- **DeepSeek R1 7B** - Balanced performance and quality
+- **DeepSeek R1 14B** - Higher quality, more resource intensive
+- **DeepSeek R1 32B** - High quality, requires significant resources
 - **Custom Models** - Any model from the Ollama library
 
 ### Model Recommendations by Device Capability
 - **Low-end devices (2-3GB RAM)**: 1.5B models
 - **Mid-range devices (4-6GB RAM)**: 7B models  
-- **High-end devices (8GB+ RAM)**: Larger models
+- **High-end devices (8GB+ RAM)**: 14B+ models
 
 ## 📱 Requirements
 
@@ -50,15 +49,12 @@ The installer provides a selection menu with these options:
 - **Android 10+** for better performance
 - **4GB+ RAM** for larger models
 - **5GB+ free storage** for multiple models
-- **Snapdragon 8 Gen 1+** or equivalent CPU
 
 ### Storage Requirements by Model
 - **1.5B models**: ~800MB
 - **7B models**: ~4GB
-- **8B models**: ~5GB
 - **14B models**: ~8GB
 - **32B models**: ~20GB
-- **70B models**: ~40GB
 
 ## 🚀 Installation Guide
 
@@ -96,14 +92,22 @@ termux-setup-storage
 git clone https://github.com/Sidharth-e/MOMOS.git
 cd MOMOS
 
-# Make the setup script executable
-chmod +x scripts/setup.sh
+# Choose your setup script:
+# For simple setup: chmod +x scripts/momo_setup.sh
+# For advanced setup: chmod +x scripts/setup.sh
 ```
 
 ### Step 4: Run the Installer
 
+**Option 1: Simple Setup (momo_setup.sh)**
 ```bash
-# Run the comprehensive setup script
+# Run the simple setup script
+bash scripts/momo_setup.sh
+```
+
+**Option 2: Advanced Setup (setup.sh)**
+```bash
+# Run the advanced setup script with progress bars
 bash scripts/setup.sh
 ```
 
@@ -186,8 +190,8 @@ ollama serve
 # In another terminal, run any model
 proot-distro login debian
 ollama run deepseek-r1:1.5b    # Fast model
-ollama run deepseek-l:7b        # Balanced model
-ollama run gemma:7b             # Gemma model
+ollama run deepseek-r1:7b       # Balanced model
+ollama run deepseek-r1:14b      # Higher quality model
 ```
 
 ## 🛠️ Troubleshooting
@@ -253,9 +257,6 @@ proot-distro list
 
 # Try installing Debian again
 proot-distro install debian
-
-# Check for errors in the process
-proot-distro install debian 2>&1 | tee debian_install.log
 ```
 
 #### 3. "Ollama installation failed" error
@@ -304,112 +305,6 @@ htop
 # Kill unnecessary processes
 pkill -f ollama
 ```
-
-#### 3. Storage space issues
-```bash
-# Check storage usage
-df -h
-
-# Remove unused models
-proot-distro login debian -- bash -c "ollama list"
-proot-distro login debian -- bash -c "ollama rm model_name"
-```
-
-## 🔄 TMUX Session Management
-
-The installer automatically starts Ollama in a TMUX session named `ollama_server` to keep it running in the background.
-
-### Check if Ollama is Running
-
-```bash
-# Enter Debian environment
-proot-distro login debian
-
-# Check if TMUX session exists
-tmux list-sessions
-
-# Attach to the ollama_server session
-tmux attach-session -t ollama_server
-```
-
-**To detach and leave Ollama running:** Press `CTRL+B` then `D`
-
-### Start Ollama Server Manually
-
-If the server isn't running, you can start it manually:
-
-```bash
-# Enter Debian environment
-proot-distro login debian
-
-# Create new TMUX session with Ollama server
-tmux new-session -d -s ollama_server 'ollama serve'
-
-# Verify it's running
-tmux list-sessions
-
-# Attach to monitor
-tmux attach-session -t ollama_server
-```
-
-### TMUX Session Management
-
-```bash
-# List all sessions
-tmux list-sessions
-
-# Attach to specific session
-tmux attach-session -t ollama_server
-
-# Kill a session
-tmux kill-session -t ollama_server
-
-# Create new session
-tmux new-session -d -s session_name 'command'
-```
-
-### Why Use TMUX?
-
-- **Background Operation**: Ollama keeps running even when you close Termux
-- **Easy Monitoring**: Attach/detach to check server status
-- **Persistent Sessions**: Server survives terminal restarts
-- **Resource Management**: Better control over background processes
-
-## ❓ FAQ
-
-### Q: Why is the installer showing "proot-distro not found"?
-**A:** This is usually a PATH issue. Try:
-1. `pkg install proot-distro -y`
-2. Check if it's in your PATH: `echo $PATH`
-3. Restart Termux completely
-
-### Q: How much storage do I need?
-**A:** Minimum 2GB for basic models, 5GB+ recommended for multiple models.
-
-### Q: Can I run multiple models at once?
-**A:** Yes, but each model uses significant RAM. Use smaller models for mobile devices.
-
-### Q: Why is the model loading slowly?
-**A:** Larger models require more RAM and processing power. Use 1.5B or 7B models for faster loading.
-
-### Q: How do I update models?
-**A:** Use `ollama pull model_name` to download the latest version of any model.
-
-### Q: Can I use this without internet?
-**A:** After initial installation and model download, you can use models offline.
-
-### Q: Why is Termux crashing?
-**A:** Usually due to insufficient RAM. Use smaller models and close other apps.
-
-### Q: How do I backup my models?
-**A:** Models are stored in the Debian environment. You can copy the Ollama directory or use `ollama list` to see what you have installed.
-
-### Q: The installer seems stuck, what should I do?
-**A:** The Debian installation can take 10-30 minutes. If it's been more than 45 minutes, try:
-1. Cancel the installation (Ctrl+C)
-2. Check your internet connection
-3. Restart Termux and try again
-4. Ensure you have enough storage space
 
 ## 🔄 Updates
 
