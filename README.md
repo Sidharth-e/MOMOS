@@ -1,4 +1,4 @@
-# MOMOS - Modern AI for Termux 🚀
+# MOMOS( Mobile Models Ollama Setup) - Modern AI for Termux 🚀
 
 A beautiful and modern UI implementation for running AI models locally on Termux (Android) using DeepSeek R1, with a comprehensive launcher and installation system.
 
