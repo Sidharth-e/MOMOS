@@ -549,6 +549,25 @@ The launcher automatically:
 - Provides easy management through the Server Management menu
 - Shows session status in System Information
 
+### Chat Functionality
+
+When you start a chat through the launcher:
+1. **Automatically enters Debian environment** using `proot-distro login debian`
+2. **Runs the model directly** with `ollama run model_name`
+3. **Provides interactive chat** inside the Debian environment
+4. **Easy return** to launcher by typing `exit` or pressing `CTRL+C`
+
+**Example chat session:**
+```bash
+# Launcher automatically runs:
+proot-distro login debian -- bash -c "
+    echo 'Starting chat session...'
+    ollama run deepseek-r1:1.5b
+"
+```
+
+This ensures that all Ollama operations happen in the correct environment with proper access to models and dependencies.
+
 ## 🚀 Future Enhancements
 
 - **Additional AI models and model families**

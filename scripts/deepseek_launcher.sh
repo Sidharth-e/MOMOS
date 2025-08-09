@@ -119,7 +119,7 @@ check_installation() {
     
     # Method 2: Check if we can access Debian directly
     if [ ! "$debian_found" = true ]; then
-        if proot-distro login debian --shared-tmp -- bash -c "echo 'Debian access test'" &> /dev/null; then
+        if proot-distro login debian -- bash -c "echo 'Debian access test successful'" &> /dev/null; then
             debian_found=true
             print_status "success" "Debian found via direct access test"
         fi
@@ -168,12 +168,12 @@ check_installation() {
     
     # Check if Ollama is available in Debian
     print_status "step" "Checking Ollama installation..."
-    if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+    if proot-distro login debian -- bash -c "command -v ollama &> /dev/null"; then
         print_status "success" "Ollama found in Debian!"
     else
         print_status "warning" "Ollama not found in Debian. Installing now..."
         
-        if proot-distro login debian --shared-tmp -- bash -c "
+        if proot-distro login debian -- bash -c "
             apt update > /dev/null 2>&1
             apt install curl -y > /dev/null 2>&1
             curl -fsSL https://ollama.ai/install.sh | sh > /dev/null 2>&1
@@ -194,30 +194,72 @@ check_installation() {
 start_ollama_server() {
     print_status "step" "Starting Ollama server..."
     
-    # Check if server is already running
-    if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+    # Check if server is already running by trying to connect to it
+    if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
         print_status "success" "Ollama server is already running!"
         print_status "info" "You can attach to it with: tmux attach-session -t ollama_server"
         print_status "info" "Press CTRL+B then D to detach and leave it running"
+        return 0
     else
         print_status "info" "Starting Ollama server in background TMUX session..."
-        proot-distro login debian --shared-tmp -- bash -c "
-            tmux new-session -d -s ollama_server 'ollama serve'
-        "
         
-        # Wait a moment for server to start
-        sleep 2
-        
-        # Verify server started successfully
-        if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+        # Method 1: Try direct TMUX session creation
+        if proot-distro login debian -- bash -c "tmux new-session -d -s ollama_server 'ollama serve' 2>/dev/null"; then
             print_status "success" "Ollama server started successfully in TMUX session!"
             print_status "info" "Session name: ollama_server"
             print_status "info" "To attach: tmux attach-session -t ollama_server"
             print_status "info" "To detach: Press CTRL+B then D"
-        else
-            print_status "error" "Failed to start Ollama server!"
-            return 1
+            return 0
         fi
+        
+        # Method 2: Try with temporary script if direct method fails
+        print_status "warning" "Direct TMUX creation failed. Trying alternative method..."
+        
+        # Create a temporary script to start the server
+        cat > /tmp/start_ollama.sh << 'EOF'
+#!/bin/bash
+# Start Ollama server in TMUX session
+if ! tmux has-session -t ollama_server 2>/dev/null; then
+    tmux new-session -d -s ollama_server 'ollama serve'
+    echo "Ollama server started in TMUX session: ollama_server"
+else
+    echo "Ollama server session already exists"
+fi
+EOF
+        
+        # Make it executable and run it in Debian
+        chmod +x /tmp/start_ollama.sh
+        if proot-distro login debian -- bash -c "bash /tmp/start_ollama.sh"; then
+            # Clean up temp file
+            rm -f /tmp/start_ollama.sh
+            
+            # Wait a moment for server to start
+            sleep 3
+            
+            # Verify server started successfully
+            if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+                print_status "success" "Ollama server started successfully in TMUX session!"
+                print_status "info" "Session name: ollama_server"
+                print_status "info" "To attach: tmux attach-session -t ollama_server"
+                print_status "info" "To detach: Press CTRL+B then D"
+                return 0
+            fi
+        fi
+        
+        # Clean up temp file if it still exists
+        rm -f /tmp/start_ollama.sh
+        
+        # If all methods failed, give manual instructions
+        print_status "error" "Failed to start Ollama server automatically!"
+        echo ""
+        echo -e "${YELLOW}${STAR} Manual Start Instructions:${NC}"
+        echo -e "${CYAN}1.${NC} Enter Debian environment: ${WHITE}proot-distro login debian${NC}"
+        echo -e "${CYAN}2.${NC} Start TMUX session: ${WHITE}tmux new-session -d -s ollama_server 'ollama serve'${NC}"
+        echo -e "${CYAN}3.${NC} Verify it's running: ${WHITE}tmux list-sessions${NC}"
+        echo -e "${CYAN}4.${NC} Attach to monitor: ${WHITE}tmux attach-session -t ollama_server${NC}"
+        echo ""
+        echo -e "${YELLOW}${STAR} Alternative: Use the launcher's Server Management (Option 3) to try again${NC}"
+        return 1
     fi
 }
 
@@ -226,7 +268,7 @@ ensure_ollama_server() {
     print_status "step" "Ensuring Ollama server is running..."
     
     # Check if server is running
-    if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+    if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
         print_status "success" "Ollama server is already running!"
         return 0
     else
@@ -242,30 +284,51 @@ run_model() {
     echo ""
     print_status "info" "Starting interactive chat session..."
     print_status "info" "Type 'exit' to return to the launcher"
+    print_status "info" "Press CTRL+C to stop the model and return to launcher"
     echo ""
     
-    proot-distro login debian --shared-tmp -- bash -c "
-        echo '${GREEN}${BRAIN} ${CURRENT_MODEL} is ready! Start chatting below:${NC}'
+    # Show model info before starting
+    echo -e "${GREEN}${BRAIN} ${CURRENT_MODEL} is ready!${NC}"
+    echo -e "${YELLOW}${STAR} Model: ${CURRENT_MODEL}${NC}"
+    echo -e "${CYAN}${CHAT} Starting chat session...${NC}"
+    echo ""
+    
+    # Enter Debian environment and run the model directly
+    proot-distro login debian -- bash -c "
+        echo '${GREEN}${BRAIN} ${CURRENT_MODEL} Chat Session${NC}'
         echo '${YELLOW}${STAR} Model: ${CURRENT_MODEL}${NC}'
-        echo '${CYAN}${CHAT} Type your message and press Enter:${NC}'
+        echo '${CYAN}${CHAT} Type your message and press Enter to chat:${NC}'
+        echo '${YELLOW}${STAR} Type \"exit\" to return to launcher${NC}'
+        echo '${YELLOW}${STAR} Press CTRL+C to stop the model${NC}'
         echo ''
+        echo 'Starting ${CURRENT_MODEL}...'
+        echo ''
+        
+        # Run the model interactively
         ollama run ${CURRENT_MODEL}
+        
+        echo ''
+        echo '${GREEN}${CHECK_MARK} Chat session ended. Returning to launcher...${NC}'
     "
+    
+    # Return to launcher
+    echo ""
+    print_status "info" "Returned to launcher. You can start another chat or exit."
 }
 
 # Function to check model status
 check_model_status() {
     print_status "step" "Checking ${CURRENT_MODEL} status..."
     
-    if proot-distro login debian --shared-tmp -- bash -c "ollama list | grep -q '${CURRENT_MODEL}'"; then
+    if proot-distro login debian -- bash -c "ollama list | grep -q '${CURRENT_MODEL}'"; then
         print_status "success" "${CURRENT_MODEL} is available!"
         
         # Get model size
-        local model_size=$(proot-distro login debian --shared-tmp -- bash -c "ollama list | grep '${CURRENT_MODEL}' | awk '{print \$3}'")
+        local model_size=$(proot-distro login debian -- bash -c "ollama list | grep '${CURRENT_MODEL}' | awk '{print \$3}'")
         print_status "info" "Model size: ${model_size}"
     else
         print_status "warning" "${CURRENT_MODEL} not found. Downloading now..."
-        proot-distro login debian --shared-tmp -- bash -c "ollama pull ${CURRENT_MODEL}"
+        proot-distro login debian -- bash -c "ollama pull ${CURRENT_MODEL}"
         print_status "success" "Model downloaded successfully!"
     fi
 }
@@ -334,7 +397,7 @@ select_model() {
             print_status "download" "Downloading ${CURRENT_MODEL}..."
             
             # Show download progress
-            proot-distro login debian --shared-tmp -- bash -c "
+            proot-distro login debian -- bash -c "
                 echo '${CYAN}${DOWNLOAD} Downloading ${CURRENT_MODEL}...${NC}'
                 echo '${YELLOW}${STAR} This may take several minutes depending on model size and internet speed${NC}'
                 echo ''
@@ -371,25 +434,25 @@ manage_models() {
         case $choice in
             1)
                 print_status "step" "Installed models:"
-                proot-distro login debian --shared-tmp -- bash -c "ollama list"
+                proot-distro login debian -- bash -c "ollama list"
                 echo ""
                 read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
                 ;;
             2)
                 print_status "step" "Installed models:"
-                proot-distro login debian --shared-tmp -- bash -c "ollama list"
+                proot-distro login debian -- bash -c "ollama list"
                 echo ""
                 read -p "$(echo -e "${YELLOW}Enter model name to remove: ${NC}")" model_to_remove
                 if [ ! -z "$model_to_remove" ]; then
                     print_status "step" "Removing ${model_to_remove}..."
-                    proot-distro login debian --shared-tmp -- bash -c "ollama rm ${model_to_remove}"
+                    proot-distro login debian -- bash -c "ollama rm ${model_to_remove}"
                     print_status "success" "Model removed successfully!"
                 fi
                 read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
                 ;;
             3)
                 print_status "step" "Model information:"
-                proot-distro login debian --shared-tmp -- bash -c "ollama show ${CURRENT_MODEL}"
+                proot-distro login debian -- bash -c "ollama show ${CURRENT_MODEL}"
                 echo ""
                 read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
                 ;;
@@ -430,13 +493,13 @@ manage_server() {
                 ;;
             2)
                 print_status "step" "Stopping Ollama server..."
-                proot-distro login debian --shared-tmp -- bash -c "tmux kill-session -t ollama_server 2>/dev/null || true"
+                proot-distro login debian -- bash -c "tmux kill-session -t ollama_server 2>/dev/null || true"
                 print_status "success" "Server stopped!"
                 read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
                 ;;
             3)
                 print_status "step" "Checking server status..."
-                if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+                if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
                     print_status "success" "Ollama server is running!"
                     print_status "info" "Session name: ollama_server"
                     print_status "info" "To attach: tmux attach-session -t ollama_server"
@@ -445,7 +508,7 @@ manage_server() {
                     # Show session info
                     echo ""
                     echo -e "${WHITE}Session Information:${NC}"
-                    proot-distro login debian --shared-tmp -- bash -c "tmux list-sessions | grep ollama_server"
+                    proot-distro login debian -- bash -c "tmux list-sessions | grep ollama_server"
                 else
                     print_status "warning" "Ollama server is not running."
                     print_status "info" "Use option 1 to start the server"
@@ -454,9 +517,9 @@ manage_server() {
                 ;;
             4)
                 print_status "step" "Showing server logs..."
-                if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+                if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
                     echo -e "${WHITE}Recent server logs:${NC}"
-                    proot-distro login debian --shared-tmp -- bash -c "tmux capture-pane -pt ollama_server -S -50 || echo 'No logs available'"
+                    proot-distro login debian -- bash -c "tmux capture-pane -pt ollama_server -S -50 || echo 'No logs available'"
                 else
                     print_status "warning" "Server not running. Start it first to view logs."
                 fi
@@ -464,11 +527,11 @@ manage_server() {
                 ;;
             5)
                 print_status "step" "Attaching to server session..."
-                if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+                if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
                     print_status "info" "Attaching to ollama_server session..."
                     print_status "info" "Press CTRL+B then D to detach and return to launcher"
                     echo ""
-                    proot-distro login debian --shared-tmp -- bash -c "tmux attach-session -t ollama_server"
+                    proot-distro login debian -- bash -c "tmux attach-session -t ollama_server"
                 else
                     print_status "warning" "Server not running. Start it first to attach."
                 fi
@@ -476,7 +539,7 @@ manage_server() {
                 ;;
             6)
                 print_status "step" "Restarting Ollama server..."
-                proot-distro login debian --shared-tmp -- bash -c "tmux kill-session -t ollama_server 2>/dev/null || true"
+                proot-distro login debian -- bash -c "tmux kill-session -t ollama_server 2>/dev/null || true"
                 sleep 1
                 start_ollama_server
                 read -p "$(echo -e "${GREEN}Press Enter to continue...${NC}")"
@@ -550,12 +613,12 @@ show_system_info() {
     
     echo -e "${WHITE}TMUX Sessions:${NC}"
     if command -v proot-distro &> /dev/null; then
-        if proot-distro login debian --shared-tmp -- bash -c "command -v tmux &> /dev/null"; then
+        if proot-distro login debian -- bash -c "command -v tmux &> /dev/null"; then
             echo -e "${CYAN}  Active TMUX sessions:${NC}"
-            proot-distro login debian --shared-tmp -- bash -c "tmux list-sessions 2>/dev/null || echo 'No active sessions'"
+            proot-distro login debian -- bash -c "tmux list-sessions 2>/dev/null || echo 'No active sessions'"
             
             # Check Ollama server session specifically
-            if proot-distro login debian --shared-tmp -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
+            if proot-distro login debian -- bash -c "tmux has-session -t ollama_server 2>/dev/null"; then
                 echo -e "${GREEN}  ✓ Ollama server session: ollama_server${NC}"
             else
                 echo -e "${RED}  ✗ Ollama server session: Not running${NC}"
@@ -570,8 +633,8 @@ show_system_info() {
     
     echo -e "${WHITE}Ollama Models:${NC}"
     if command -v proot-distro &> /dev/null; then
-        if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
-            proot-distro login debian --shared-tmp -- bash -c "ollama list 2>/dev/null || echo 'No models found'"
+        if proot-distro login debian -- bash -c "command -v ollama &> /dev/null"; then
+            proot-distro login debian -- bash -c "ollama list 2>/dev/null || echo 'No models found'"
         else
             echo "Ollama not installed in Debian"
         fi
@@ -630,15 +693,31 @@ run_diagnostics() {
             echo -e "${GREEN}✓ Debian is listed in proot-distro${NC}"
             
             # Check if we can access it
-            if proot-distro login debian --shared-tmp -- bash -c "echo 'Debian access test successful'" &> /dev/null; then
+            if proot-distro login debian -- bash -c "echo 'Debian access test successful'" &> /dev/null; then
                 echo -e "${GREEN}✓ Can access Debian environment${NC}"
                 
                 # Check Ollama
-                if proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+                if proot-distro login debian -- bash -c "command -v ollama &> /dev/null"; then
                     echo -e "${GREEN}✓ Ollama is installed in Debian${NC}"
-                    echo -e "${CYAN}Ollama version:${NC} $(proot-distro login debian --shared-tmp -- bash -c "ollama --version 2>/dev/null || echo 'Version not available'")"
+                    echo -e "${CYAN}Ollama version:${NC} $(proot-distro login debian -- bash -c "ollama --version 2>/dev/null || echo 'Version not available'")"
                 else
                     echo -e "${RED}✗ Ollama not found in Debian${NC}"
+                fi
+                
+                # Check TMUX
+                if proot-distro login debian -- bash -c "command -v tmux &> /dev/null"; then
+                    echo -e "${GREEN}✓ TMUX is installed in Debian${NC}"
+                    echo -e "${CYAN}TMUX version:${NC} $(proot-distro login debian -- bash -c "tmux -V 2>/dev/null || echo 'Version not available'")"
+                    
+                    # Test TMUX functionality
+                    echo -e "${CYAN}Testing TMUX functionality:${NC}"
+                    if proot-distro login debian -- bash -c "tmux new-session -d -s test_session 'echo test' 2>/dev/null && tmux has-session -t test_session 2>/dev/null && tmux kill-session -t test_session 2>/dev/null"; then
+                        echo -e "${GREEN}✓ TMUX is working properly${NC}"
+                    else
+                        echo -e "${RED}✗ TMUX has issues - may not work for Ollama server${NC}"
+                    fi
+                else
+                    echo -e "${RED}✗ TMUX not found in Debian${NC}"
                 fi
             else
                 echo -e "${RED}✗ Cannot access Debian environment${NC}"
@@ -666,8 +745,10 @@ run_diagnostics() {
         echo -e "${YELLOW}1. Install proot-distro: ${WHITE}pkg install proot-distro -y${NC}"
     elif ! proot-distro list | grep -q "debian"; then
         echo -e "${YELLOW}1. Install Debian: ${WHITE}proot-distro install debian${NC}"
-    elif ! proot-distro login debian --shared-tmp -- bash -c "command -v ollama &> /dev/null"; then
+    elif ! proot-distro login debian -- bash -c "command -v ollama &> /dev/null"; then
         echo -e "${YELLOW}1. Install Ollama in Debian: ${WHITE}proot-distro login debian -- bash -c 'curl -fsSL https://ollama.ai/install.sh | sh'${NC}"
+    elif ! proot-distro login debian -- bash -c "command -v tmux &> /dev/null"; then
+        echo -e "${YELLOW}1. Install TMUX in Debian: ${WHITE}proot-distro login debian -- bash -c 'apt update && apt install tmux -y'${NC}"
     else
         echo -e "${GREEN}✓ All components are properly installed!${NC}"
     fi
