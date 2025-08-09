@@ -48,11 +48,14 @@ if [ -d "$PREFIX/var/lib/proot-distro/installed-rootfs/debian" ]; then
     print_status success "Debian is already installed."
     echo -e "${WHITE}Run:${NC}"
     echo -e "${CYAN}  proot-distro login debian${NC}"
+    echo -e "${YELLOW}${STAR} Create new TMUX session with Ollama server: tmux new-session -d -s ollama_server 'ollama serve'${NC}"
+    echo -e "${YELLOW}${STAR} Verify it's running: Use tmux list-sessions${NC}"
+    echo -e "${YELLOW}${STAR} Tip: Use tmux attach -t ollama_server to manage Ollama${NC}"
     echo -e "${CYAN}  ollama run <Model>${NC}"
-    echo -e "${YELLOW}${STAR} Tip: Use 'tmux attach -t ollama_server' to manage Ollama.${NC}"
     echo -e "${GREEN}${ROCKET} Enjoy your AI assistant!${NC}"
     exit 0
 fi
+
 
 # Step 2: Update Termux Packages
 print_status step "Updating Termux packages..."
@@ -100,9 +103,11 @@ proot-distro login debian --shared-tmp -- bash -c "
     echo 'Setup complete!'
 "
 
-    echo -e "${GREEN}${SUCCESS} Installation Complete!${NC}"
-    echo -e "${WHITE}Run:${NC}"
-    echo -e "${CYAN}  proot-distro login debian${NC}"
-    echo -e "${CYAN}  ollama run ${SELECTED_MODEL}${NC}"
-    echo -e "${YELLOW}${STAR} Tip: Use 'tmux attach -t ollama_server' to manage Ollama.${NC}"
-    echo -e "${GREEN}${ROCKET} Enjoy your AI assistant!${NC}"
+echo -e "${GREEN}${SUCCESS} Installation Complete!${NC}"
+echo -e "${WHITE}Run:${NC}"
+echo -e "${CYAN}  proot-distro login debian${NC}"
+echo -e "${YELLOW}${STAR} Create new TMUX session with Ollama server: tmux new-session -d -s ollama_server 'ollama serve'${NC}"
+echo -e "${YELLOW}${STAR} Verify it's running: Use tmux list-sessions${NC}"
+echo -e "${CYAN}  ollama run ${SELECTED_MODEL}${NC}"
+echo -e "${YELLOW}${STAR} Tip: Use tmux attach -t ollama_server to manage Ollama${NC}"
+echo -e "${GREEN}${ROCKET} Enjoy your AI assistant!${NC}"
