@@ -54,7 +54,16 @@ The installer auto-detects your RAM and highlights the recommended model.
 
 ## First-Time Termux Setup
 
-If you've never used Termux before, run these first:
+If you've never used Termux before, run this single command — it handles everything:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh | bash
+```
+
+This will update Termux, install essential tools, configure storage access, and offer to install MOMOS automatically.
+
+<details>
+<summary>Manual setup (alternative)</summary>
 
 ```bash
 pkg update && pkg upgrade -y
@@ -62,7 +71,8 @@ pkg install curl -y
 termux-setup-storage
 ```
 
-Then run the install command above.
+Then run the MOMOS install command above.
+</details>
 
 ## How It Works
 
