@@ -241,19 +241,10 @@ show_help() {
     echo "Commands:"
     echo "  chat [model]   Start chatting (default: last used model)"
     echo "  models         List / pull / remove models"
-    echo "  server         Start or attach to Ollama server"
+    echo "  server         Start Ollama server in foreground"
     echo "  help           Show this help"
     echo ""
     echo "No arguments = interactive menu"
-}
-
-ensure_server() {
-    proot-distro login debian --shared-tmp -- bash -c "
-        if ! tmux has-session -t ollama_server 2>/dev/null; then
-            tmux new-session -d -s ollama_server 'ollama serve'
-            sleep 3
-        fi
-    "
 }
 
 cmd_chat() {
@@ -263,29 +254,30 @@ cmd_chat() {
         exit 1
     fi
     echo "$target" > "$STATE_FILE"
-    ensure_server
-    proot-distro login debian --shared-tmp -- ollama run "$target"
+    proot-distro login debian --shared-tmp -- bash -c "
+        ollama serve > /dev/null 2>&1 &
+        sleep 3
+        ollama run '$target'
+    "
 }
 
 cmd_models() {
-    ensure_server
-    echo "Installed models:"
-    proot-distro login debian --shared-tmp -- ollama list
-    echo ""
-    read -rp "Pull a new model? (enter tag or leave blank to skip): " new_model
-    if [ -n "$new_model" ]; then
-        proot-distro login debian --shared-tmp -- ollama pull "$new_model"
-    fi
+    proot-distro login debian --shared-tmp -- bash -c "
+        ollama serve > /dev/null 2>&1 &
+        sleep 3
+        echo 'Installed models:'
+        ollama list
+        echo ''
+        read -rp 'Pull a new model? (enter tag or leave blank to skip): ' new_model
+        if [ -n \"\$new_model\" ]; then
+            ollama pull \"\$new_model\"
+        fi
+    "
 }
 
 cmd_server() {
-    proot-distro login debian --shared-tmp -- bash -c "
-        if tmux has-session -t ollama_server 2>/dev/null; then
-            tmux attach-session -t ollama_server
-        else
-            tmux new-session -s ollama_server 'ollama serve'
-        fi
-    "
+    echo "Starting Ollama server (Ctrl+C to stop)..."
+    proot-distro login debian --shared-tmp -- ollama serve
 }
 
 cmd_menu() {

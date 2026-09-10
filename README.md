@@ -25,7 +25,7 @@ momos                # interactive menu
 momos chat           # chat with your last used model
 momos chat llama3.2  # chat with a specific model
 momos models         # list, pull, or remove models
-momos server         # start or attach to the Ollama server
+momos server         # start Ollama server in foreground
 momos help           # show available commands
 ```
 
