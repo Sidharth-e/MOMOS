@@ -51,6 +51,13 @@ momos logs                      # view live Ollama server logs (Ctrl+C to stop)
 > [!NOTE]
 > You don't need to run `momos logs` to use MOMOS. The server starts automatically in the background when you run `momos chat` or `momos models`. This command is only for viewing live server activity.
 
+### Update & Uninstall
+
+```bash
+momos update                    # update MOMOS and Ollama
+momos uninstall                 # uninstall MOMOS and remove models
+```
+
 ### Help
 
 ```bash
@@ -75,12 +82,9 @@ The installer auto-detects your RAM and highlights the recommended model.
 ## Requirements
 
 - **Android 7.0+**
-- **Termux** from [F-Droid](https://f-droid.org/packages/com.termux/) or [GitHub Releases](https://github.com/termux/termux-app/releases)
+- **Termux** from Google Play Store, [F-Droid](https://f-droid.org/packages/com.termux/), or [GitHub Releases](https://github.com/termux/termux-app/releases)
 - **2GB+ free storage** (more for larger models)
 - **Internet connection** for initial setup
-
-> [!WARNING]
-> Do **not** install Termux from Google Play Store — it's outdated and will not work.
 
 ## New to Termux?
 
@@ -159,15 +163,43 @@ bash MOMOS/scripts/momos.sh
 
 ## Updating
 
-Re-run the install command — it's safe to run multiple times. Already-completed steps are skipped automatically.
+Update directly using `momos`:
+
+```bash
+momos update
+```
+
+Or re-run the setup command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh --update
+```
+
+Already-completed steps are skipped automatically.
 
 ## Uninstall
+
+Uninstall directly using `momos`:
+
+```bash
+momos uninstall
+```
+
+Or run the setup uninstall command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh --uninstall
+```
+
+<details>
+<summary>Manual uninstall</summary>
 
 ```bash
 proot-distro remove debian
 rm -rf ~/.momos
 rm "$PREFIX/bin/momos"
 ```
+</details>
 
 ---
 

@@ -248,6 +248,8 @@ show_help() {
     echo "  models pull <name>    Download a new model"
     echo "  models delete <name>  Remove an installed model"
     echo "  logs                  View live Ollama server logs"
+    echo "  update                Update MOMOS and Ollama"
+    echo "  uninstall             Uninstall MOMOS and remove models"
     echo "  help                  Show this help"
     echo ""
     echo "Examples:"
@@ -256,6 +258,8 @@ show_help() {
     echo "  momos models list                See what's installed"
     echo "  momos models pull gemma3:4b      Download Gemma 3 4B"
     echo "  momos models delete llama3.2:3b  Remove a model"
+    echo "  momos update                     Update MOMOS"
+    echo "  momos uninstall                  Uninstall MOMOS"
     echo ""
     echo "No arguments = interactive menu"
     echo ""
@@ -338,6 +342,34 @@ cmd_logs() {
     proot-distro login debian --shared-tmp -- ollama serve
 }
 
+cmd_update() {
+    echo "Updating MOMOS..."
+    curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh --update
+}
+
+cmd_uninstall() {
+    read -rp "Are you sure you want to uninstall MOMOS? This will remove all downloaded models and Debian container [y/N]: " confirm
+    case "$confirm" in
+        [yY]|[yY][eE][sS])
+            echo "Stopping Ollama server..."
+            proot-distro login debian --shared-tmp -- tmux kill-session -t ollama_server 2>/dev/null || true
+            pkill -f "ollama" 2>/dev/null || true
+            echo "Removing Debian container..."
+            proot-distro remove debian 2>/dev/null || true
+            echo "Removing MOMOS configuration..."
+            rm -rf "$HOME/.momos"
+            echo "Removing launcher..."
+            rm -f "$PREFIX/bin/momos"
+            echo "MOMOS has been uninstalled."
+            exit 0
+            ;;
+        *)
+            echo "Uninstall cancelled."
+            exit 0
+            ;;
+    esac
+}
+
 cmd_menu() {
     echo "╭──────────────────────────╮"
     echo "│   MOMOS — Quick Menu     │"
@@ -348,10 +380,12 @@ cmd_menu() {
     echo "  [3] Pull a new model"
     echo "  [4] Delete a model"
     echo "  [5] View server logs"
-    echo "  [6] Help"
-    echo "  [7] Exit"
+    echo "  [6] Update MOMOS"
+    echo "  [7] Uninstall MOMOS"
+    echo "  [8] Help"
+    echo "  [9] Exit"
     echo ""
-    read -rp "Choice [1-7]: " pick
+    read -rp "Choice [1-9]: " pick
     case "$pick" in
         1) cmd_chat "$@" ;;
         2) cmd_models list ;;
@@ -368,17 +402,21 @@ cmd_menu() {
             fi
             ;;
         5) cmd_logs ;;
-        6) show_help ;;
+        6) cmd_update ;;
+        7) cmd_uninstall ;;
+        8) show_help ;;
         *) exit 0 ;;
     esac
 }
 
 case "${1:-}" in
-    chat)   shift; cmd_chat "$@" ;;
-    models) shift; cmd_models "$@" ;;
-    logs)   cmd_logs ;;
+    chat)      shift; cmd_chat "$@" ;;
+    models)    shift; cmd_models "$@" ;;
+    logs)      cmd_logs ;;
+    update)    cmd_update ;;
+    uninstall) cmd_uninstall ;;
     help|--help|-h) show_help ;;
-    *)      cmd_menu "$@" ;;
+    *)         cmd_menu "$@" ;;
 esac
 LAUNCHER_HEADER
 
@@ -400,6 +438,10 @@ finish() {
     echo -e "    ${CYAN}momos models pull <name>${NC}   ${DIM}download a new model${NC}"
     echo -e "    ${CYAN}momos models delete <name>${NC} ${DIM}remove a model${NC}"
     echo ""
+    echo -e "  ${WHITE}Maintenance:${NC}"
+    echo -e "    ${CYAN}momos update${NC}               ${DIM}update MOMOS and Ollama${NC}"
+    echo -e "    ${CYAN}momos uninstall${NC}            ${DIM}remove MOMOS and models${NC}"
+    echo ""
     echo -e "  ${WHITE}Other:${NC}"
     echo -e "    ${CYAN}momos logs${NC}                 ${DIM}view live server logs${NC}"
     echo -e "    ${CYAN}momos help${NC}                 ${DIM}show all commands${NC}"
@@ -408,7 +450,55 @@ finish() {
     echo ""
 }
 
+uninstall_momos() {
+    header
+    echo -e "${YELLOW}Uninstalling MOMOS...${NC}"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Are you sure you want to uninstall MOMOS? This will remove all downloaded models and Debian container [y/N]: ${NC}")" confirm < /dev/tty
+    case "$confirm" in
+        [yY]|[yY][eE][sS])
+            info "Stopping Ollama server..."
+            proot-distro login debian --shared-tmp -- tmux kill-session -t ollama_server 2>/dev/null || true
+            pkill -f "ollama" 2>/dev/null || true
+            info "Removing Debian container..."
+            proot-distro remove debian 2>/dev/null || true
+            info "Removing MOMOS configuration and state..."
+            rm -rf "$LOG_DIR"
+            info "Removing launcher..."
+            rm -f "$LAUNCHER_PATH"
+            success "MOMOS has been completely uninstalled."
+            exit 0
+            ;;
+        *)
+            echo "Uninstall cancelled."
+            exit 0
+            ;;
+    esac
+}
+
 main() {
+    local action="${1:-}"
+    case "$action" in
+        --uninstall|uninstall)
+            uninstall_momos
+            return
+            ;;
+        --update|update)
+            header
+            preflight
+            if [ -f "$STATE_FILE" ]; then
+                SELECTED_MODEL=$(cat "$STATE_FILE")
+            else
+                select_model
+            fi
+            install_debian
+            configure_debian "$SELECTED_MODEL"
+            install_launcher "$SELECTED_MODEL"
+            finish "$SELECTED_MODEL"
+            return
+            ;;
+    esac
+
     header
     preflight
     select_model
@@ -418,4 +508,4 @@ main() {
     finish "$SELECTED_MODEL"
 }
 
-main
+main "$@"
