@@ -110,7 +110,7 @@ install_essentials() {
 update_momos() {
     header
     info "Updating MOMOS..."
-    curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh --update
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)" bash --update
 }
 
 uninstall_momos() {
@@ -157,7 +157,7 @@ prompt_momos() {
         case "$choice" in
             1) update_momos ;;
             2)
-                curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh
+                bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)"
                 ;;
             3) uninstall_momos ;;
             *) finish_standalone ;;
@@ -176,7 +176,7 @@ prompt_momos() {
             echo ""
             info "Launching MOMOS installer..."
             echo ""
-            curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh
+            bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)"
         else
             finish_standalone
         fi
@@ -193,7 +193,7 @@ finish_standalone() {
     echo -e "    ${GREEN}✓${NC} curl, wget, git"
     echo ""
     echo -e "  ${WHITE}To install MOMOS later:${NC}"
-    echo -e "    ${CYAN}curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh${NC}"
+    echo -e "    ${CYAN}bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)\"${NC}"
     echo ""
     echo -e "  ${DIM}Logs: $LOG_FILE${NC}"
     echo ""

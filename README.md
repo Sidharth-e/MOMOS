@@ -24,7 +24,7 @@ Run lightweight AI models locally on your Android phone using Termux and Ollama.
 Open **[Termux](https://f-droid.org/packages/com.termux/)** and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)"
 ```
 
 The installer will test your hardware, recommend a model, set up the environment, and drop you straight into chat.
@@ -105,7 +105,7 @@ momos help                       # Show all commands
 If you just installed Termux, run this setup script first to update packages and grant storage permissions:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh -o /tmp/setup.sh && bash /tmp/setup.sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh)"
 ```
 
 <details>

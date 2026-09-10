@@ -341,7 +341,7 @@ cmd_logs() {
 
 cmd_update() {
     echo "Updating MOMOS..."
-    curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh --update
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)" bash --update
 }
 
 cmd_uninstall() {
