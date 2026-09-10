@@ -104,19 +104,19 @@ preflight() {
 
 select_model() {
     local recommended=""
-    if [ "$RAM_MB" -ge 10000 ]; then
+    if [ "$RAM_MB" -ge 7000 ]; then
+        recommended="5"
+    elif [ "$RAM_MB" -ge 3500 ]; then
         recommended="3"
-    elif [ "$RAM_MB" -ge 4000 ]; then
-        recommended="2"
     else
         recommended="1"
     fi
 
     declare -a NAMES TAGS SIZES RAM_REQS
-    NAMES=("DeepSeek R1 1.5B" "DeepSeek R1 7B" "DeepSeek R1 14B" "DeepSeek R1 32B" "Gemma 3 4B" "Llama 3.2 3B" "Custom model")
-    TAGS=("deepseek-r1:1.5b" "deepseek-r1:7b" "deepseek-r1:14b" "deepseek-r1:32b" "gemma3:4b" "llama3.2:3b" "")
-    SIZES=("~800MB" "~4GB" "~8GB" "~20GB" "~2.5GB" "~2GB" "")
-    RAM_REQS=("2GB+" "4GB+" "8GB+" "12GB+" "4GB+" "3GB+" "")
+    NAMES=("Llama 3.2 1B" "DeepSeek R1 1.5B" "Llama 3.2 3B" "Qwen 2.5 3B" "DeepSeek R1 7B" "Qwen 2.5 7B" "Custom model")
+    TAGS=("llama3.2:1b" "deepseek-r1:1.5b" "llama3.2:3b" "qwen2.5:3b" "deepseek-r1:7b" "qwen2.5:7b" "")
+    SIZES=("~1.3GB" "~1.1GB" "~2.0GB" "~1.9GB" "~4.7GB" "~4.7GB" "")
+    RAM_REQS=("2GB+" "2GB+" "4GB+" "4GB+" "6GB+" "6GB+" "")
 
     echo -e "${WHITE}${BOLD}Select a model:${NC}"
     echo ""
@@ -148,7 +148,7 @@ select_model() {
     local idx=$((choice - 1))
 
     if [ -z "${TAGS[$idx]}" ]; then
-        read -rp "$(echo -e "${YELLOW}Enter model tag (e.g. mistral:7b): ${NC}")" custom_tag < /dev/tty
+        read -rp "$(echo -e "${YELLOW}Enter model tag (e.g. qwen2.5:3b): ${NC}")" custom_tag < /dev/tty
         if [ -z "$custom_tag" ]; then
             fail "No model name entered."
             exit 1
@@ -160,12 +160,9 @@ select_model() {
 
     local needed_mb=0
     case "$SELECTED_MODEL" in
-        *1.5b*) needed_mb=900 ;;
-        *3b*)   needed_mb=2200 ;;
-        *4b*)   needed_mb=2800 ;;
-        *7b*)   needed_mb=4500 ;;
-        *14b*)  needed_mb=9000 ;;
-        *32b*)  needed_mb=21000 ;;
+        *1b*|*1.5b*) needed_mb=1600 ;;
+        *3b*)        needed_mb=2500 ;;
+        *7b*)        needed_mb=5500 ;;
     esac
 
     if [ "$needed_mb" -gt 0 ] && [ "$STORAGE_MB" -lt "$needed_mb" ]; then
@@ -256,7 +253,7 @@ show_help() {
     echo "  momos chat                       Chat with last used model"
     echo "  momos chat deepseek-r1:1.5b      Chat with a specific model"
     echo "  momos models list                See what's installed"
-    echo "  momos models pull gemma3:4b      Download Gemma 3 4B"
+    echo "  momos models pull qwen2.5:3b     Download Qwen 2.5 3B"
     echo "  momos models delete llama3.2:3b  Remove a model"
     echo "  momos update                     Update MOMOS"
     echo "  momos uninstall                  Uninstall MOMOS"
@@ -300,7 +297,7 @@ cmd_models() {
             local name="${2:-}"
             if [ -z "$name" ]; then
                 echo "Usage: momos models pull <model>"
-                echo "Example: momos models pull gemma3:4b"
+                echo "Example: momos models pull qwen2.5:3b"
                 echo ""
                 echo "Browse models at: https://ollama.com/library"
                 exit 1
@@ -390,7 +387,7 @@ cmd_menu() {
         1) cmd_chat "$@" ;;
         2) cmd_models list ;;
         3)
-            read -rp "Model to pull (e.g. gemma3:4b): " pull_name
+            read -rp "Model to pull (e.g. qwen2.5:3b): " pull_name
             if [ -n "$pull_name" ]; then
                 cmd_models pull "$pull_name"
             fi
