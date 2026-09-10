@@ -236,21 +236,41 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 show_help() {
-    echo "Usage: momos [command]"
+    echo "╭──────────────────────────────────────────╮"
+    echo "│   MOMOS — Mobile Models Ollama Setup     │"
+    echo "╰──────────────────────────────────────────╯"
+    echo ""
+    echo "Usage: momos [command] [options]"
     echo ""
     echo "Commands:"
-    echo "  chat [model]   Start chatting (default: last used model)"
-    echo "  models         List / pull / remove models"
-    echo "  server         Start Ollama server in foreground"
-    echo "  help           Show this help"
+    echo "  chat [model]          Start chatting (default: last used model)"
+    echo "  models list           Show all installed models"
+    echo "  models pull <name>    Download a new model"
+    echo "  models delete <name>  Remove an installed model"
+    echo "  logs                  View live Ollama server logs"
+    echo "  help                  Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  momos chat                       Chat with last used model"
+    echo "  momos chat deepseek-r1:1.5b      Chat with a specific model"
+    echo "  momos models list                See what's installed"
+    echo "  momos models pull gemma3:4b      Download Gemma 3 4B"
+    echo "  momos models delete llama3.2:3b  Remove a model"
     echo ""
     echo "No arguments = interactive menu"
+    echo ""
+    if [ -n "$MODEL" ]; then
+        echo "Last used model: $MODEL"
+    fi
 }
 
 cmd_chat() {
     local target="${1:-$MODEL}"
     if [ -z "$target" ]; then
-        echo "No model specified. Run: momos chat <model>"
+        echo "No model specified."
+        echo ""
+        echo "Usage: momos chat [model]"
+        echo "Example: momos chat deepseek-r1:1.5b"
         exit 1
     fi
     echo "$target" > "$STATE_FILE"
@@ -262,21 +282,59 @@ cmd_chat() {
 }
 
 cmd_models() {
-    proot-distro login debian --shared-tmp -- bash -c "
-        ollama serve > /dev/null 2>&1 &
-        sleep 3
-        echo 'Installed models:'
-        ollama list
-        echo ''
-        read -rp 'Pull a new model? (enter tag or leave blank to skip): ' new_model
-        if [ -n \"\$new_model\" ]; then
-            ollama pull \"\$new_model\"
-        fi
-    "
+    local action="${1:-}"
+
+    case "$action" in
+        list|ls|"")
+            proot-distro login debian --shared-tmp -- bash -c "
+                ollama serve > /dev/null 2>&1 &
+                sleep 3
+                ollama list
+            "
+            ;;
+        pull|add)
+            local name="${2:-}"
+            if [ -z "$name" ]; then
+                echo "Usage: momos models pull <model>"
+                echo "Example: momos models pull gemma3:4b"
+                echo ""
+                echo "Browse models at: https://ollama.com/library"
+                exit 1
+            fi
+            proot-distro login debian --shared-tmp -- bash -c "
+                ollama serve > /dev/null 2>&1 &
+                sleep 3
+                ollama pull '$name'
+            "
+            ;;
+        delete|rm|remove)
+            local name="${2:-}"
+            if [ -z "$name" ]; then
+                echo "Usage: momos models delete <model>"
+                echo "Example: momos models delete llama3.2:3b"
+                exit 1
+            fi
+            proot-distro login debian --shared-tmp -- bash -c "
+                ollama serve > /dev/null 2>&1 &
+                sleep 3
+                ollama rm '$name'
+            "
+            ;;
+        *)
+            echo "Unknown models command: $action"
+            echo ""
+            echo "Usage:"
+            echo "  momos models list           Show installed models"
+            echo "  momos models pull <name>    Download a model"
+            echo "  momos models delete <name>  Remove a model"
+            exit 1
+            ;;
+    esac
 }
 
-cmd_server() {
-    echo "Starting Ollama server (Ctrl+C to stop)..."
+cmd_logs() {
+    echo "Starting Ollama server with live logs (Ctrl+C to stop)..."
+    echo ""
     proot-distro login debian --shared-tmp -- ollama serve
 }
 
@@ -286,23 +344,39 @@ cmd_menu() {
     echo "╰──────────────────────────╯"
     echo ""
     echo "  [1] Chat with AI"
-    echo "  [2] Manage models"
-    echo "  [3] Ollama server"
-    echo "  [4] Exit"
+    echo "  [2] List models"
+    echo "  [3] Pull a new model"
+    echo "  [4] Delete a model"
+    echo "  [5] View server logs"
+    echo "  [6] Help"
+    echo "  [7] Exit"
     echo ""
-    read -rp "Choice [1-4]: " pick
+    read -rp "Choice [1-7]: " pick
     case "$pick" in
         1) cmd_chat "$@" ;;
-        2) cmd_models ;;
-        3) cmd_server ;;
+        2) cmd_models list ;;
+        3)
+            read -rp "Model to pull (e.g. gemma3:4b): " pull_name
+            if [ -n "$pull_name" ]; then
+                cmd_models pull "$pull_name"
+            fi
+            ;;
+        4)
+            read -rp "Model to delete: " del_name
+            if [ -n "$del_name" ]; then
+                cmd_models delete "$del_name"
+            fi
+            ;;
+        5) cmd_logs ;;
+        6) show_help ;;
         *) exit 0 ;;
     esac
 }
 
 case "${1:-}" in
     chat)   shift; cmd_chat "$@" ;;
-    models) cmd_models ;;
-    server) cmd_server ;;
+    models) shift; cmd_models "$@" ;;
+    logs)   cmd_logs ;;
     help|--help|-h) show_help ;;
     *)      cmd_menu "$@" ;;
 esac
@@ -318,12 +392,17 @@ finish() {
     echo -e "${GREEN}${BOLD}🎉 All done!${NC}"
     echo ""
     echo -e "  ${WHITE}Start chatting now:${NC}"
-    echo -e "    ${CYAN}momos${NC}              ${DIM}interactive menu${NC}"
-    echo -e "    ${CYAN}momos chat${NC}          ${DIM}jump straight into ${model}${NC}"
+    echo -e "    ${CYAN}momos${NC}                    ${DIM}interactive menu${NC}"
+    echo -e "    ${CYAN}momos chat${NC}                ${DIM}jump straight into ${model}${NC}"
     echo ""
-    echo -e "  ${WHITE}Other commands:${NC}"
-    echo -e "    ${CYAN}momos models${NC}        ${DIM}list, pull, or remove models${NC}"
-    echo -e "    ${CYAN}momos server${NC}        ${DIM}manage Ollama server${NC}"
+    echo -e "  ${WHITE}Manage models:${NC}"
+    echo -e "    ${CYAN}momos models list${NC}          ${DIM}see installed models${NC}"
+    echo -e "    ${CYAN}momos models pull <name>${NC}   ${DIM}download a new model${NC}"
+    echo -e "    ${CYAN}momos models delete <name>${NC} ${DIM}remove a model${NC}"
+    echo ""
+    echo -e "  ${WHITE}Other:${NC}"
+    echo -e "    ${CYAN}momos logs${NC}                 ${DIM}view live server logs${NC}"
+    echo -e "    ${CYAN}momos help${NC}                 ${DIM}show all commands${NC}"
     echo ""
     echo -e "  ${DIM}Logs: $LOG_FILE${NC}"
     echo ""

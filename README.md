@@ -2,12 +2,14 @@
 
 Run AI models locally on your Android phone using Termux. One command to install, one command to chat.
 
+![MOMOS installation in Termux](assets/termux.png)
+
 ## Quick Install
 
 Open **Termux** and paste:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh -o /tmp/momos.sh && bash /tmp/momos.sh
 ```
 
 The installer will:
@@ -20,13 +22,39 @@ The installer will:
 
 ## Usage
 
+### Chat
+
 ```bash
-momos                # interactive menu
-momos chat           # chat with your last used model
-momos chat llama3.2  # chat with a specific model
-momos models         # list, pull, or remove models
-momos server         # start Ollama server in foreground
-momos help           # show available commands
+momos                           # interactive menu
+momos chat                      # chat with your last used model
+momos chat deepseek-r1:1.5b     # chat with a specific model
+```
+
+### Manage Models
+
+```bash
+momos models list               # show installed models
+momos models pull gemma3:4b     # download a new model
+momos models delete llama3.2:3b # remove a model
+```
+
+Browse all available models at [ollama.com/library](https://ollama.com/library).
+
+### Server Logs
+
+```bash
+momos logs                      # view live Ollama server logs (Ctrl+C to stop)
+```
+
+![Ollama server logs](assets/ollama-server.png)
+
+> [!NOTE]
+> You don't need to run `momos logs` to use MOMOS. The server starts automatically in the background when you run `momos chat` or `momos models`. This command is only for viewing live server activity.
+
+### Help
+
+```bash
+momos help                      # show all commands with examples
 ```
 
 ## Supported Models
@@ -59,7 +87,7 @@ The installer auto-detects your RAM and highlights the recommended model.
 If you've never used Termux before, run this first — it updates Termux, installs essential tools (curl, wget, git), sets up storage access, and then offers to install MOMOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh -o /tmp/setup.sh && bash /tmp/setup.sh
 ```
 
 <details>
@@ -82,14 +110,14 @@ Then run the MOMOS install command from the Quick Install section.
 │  ┌───────────────────────────────────┐  │
 │  │  Debian (via PRoot — no root)     │  │
 │  │  ┌─────────────────────────────┐  │  │
-│  │  │  Ollama Server (tmux)       │  │  │
+│  │  │  Ollama Server (background) │  │  │
 │  │  │  └─ Your AI Model          │  │  │
 │  │  └─────────────────────────────┘  │  │
 │  └───────────────────────────────────┘  │
 └─────────────────────────────────────────┘
 ```
 
-MOMOS creates a Debian container inside Termux using PRoot (no root required), installs Ollama inside it, and manages everything through the `momos` command.
+MOMOS creates a Debian container inside Termux using PRoot (no root required), installs Ollama inside it, and manages everything through the `momos` command. The Ollama server starts automatically in the background when needed.
 
 ## Troubleshooting
 
@@ -117,13 +145,9 @@ Your device may not have enough RAM. Switch to a smaller model:
 momos chat deepseek-r1:1.5b
 ```
 
-### Ollama server not running
+### "Could not connect to ollama server"
 
-```bash
-momos server
-```
-
-This will start or reattach to the server.
+The server should start automatically. If it doesn't, try running `momos logs` to see any errors, then open a new Termux tab and run `momos chat`.
 
 ## Alternative: Install from Source
 
