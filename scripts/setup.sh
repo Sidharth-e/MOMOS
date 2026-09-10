@@ -119,7 +119,7 @@ prompt_momos() {
     echo -e "  ${CYAN}[1]${NC} Yes — install MOMOS now"
     echo -e "  ${CYAN}[2]${NC} No  — just finish setup"
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [1-2] (default=1): ${NC}")" choice
+    read -rp "$(echo -e "${YELLOW}Choice [1-2] (default=1): ${NC}")" choice < /dev/tty
     choice="${choice:-1}"
 
     if [ "$choice" = "1" ]; then

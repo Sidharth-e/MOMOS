@@ -137,7 +137,7 @@ select_model() {
     done
 
     echo ""
-    read -rp "$(echo -e "${YELLOW}Enter choice [1-${#NAMES[@]}] (default=$recommended): ${NC}")" choice
+    read -rp "$(echo -e "${YELLOW}Enter choice [1-${#NAMES[@]}] (default=$recommended): ${NC}")" choice < /dev/tty
     choice="${choice:-$recommended}"
 
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#NAMES[@]}" ]; then
@@ -148,7 +148,7 @@ select_model() {
     local idx=$((choice - 1))
 
     if [ -z "${TAGS[$idx]}" ]; then
-        read -rp "$(echo -e "${YELLOW}Enter model tag (e.g. mistral:7b): ${NC}")" custom_tag
+        read -rp "$(echo -e "${YELLOW}Enter model tag (e.g. mistral:7b): ${NC}")" custom_tag < /dev/tty
         if [ -z "$custom_tag" ]; then
             fail "No model name entered."
             exit 1
