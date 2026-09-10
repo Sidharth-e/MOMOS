@@ -48,12 +48,14 @@ header() {
 
 get_ram_mb() {
     local mem
-    mem=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print int($2/1024)}')
+    mem=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print int($2/1024)}' || true)
     echo "${mem:-0}"
 }
 
 get_free_storage_mb() {
-    df -m "$HOME" 2>/dev/null | awk 'NR==2{print $4}'
+    local storage
+    storage=$(df -m "$HOME" 2>/dev/null | awk 'NR==2{print $4}' || true)
+    echo "${storage:-0}"
 }
 
 check_internet() {
