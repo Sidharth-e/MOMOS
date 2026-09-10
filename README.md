@@ -10,35 +10,37 @@ Open **Termux** and paste:
 curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh | bash
 ```
 
-That's it. The installer will:
+The installer will:
+
 - Check your device (RAM, storage, internet)
 - Recommend the best model for your hardware
-- Install everything automatically
-- Give you a `momos` command for daily use
+- Set up a Debian container via PRoot (no root needed)
+- Install Ollama and pull your chosen model
+- Add a `momos` command for daily use
 
-## Daily Usage
-
-After install, just type:
+## Usage
 
 ```bash
 momos                # interactive menu
-momos chat           # start chatting with your last model
+momos chat           # chat with your last used model
 momos chat llama3.2  # chat with a specific model
 momos models         # list, pull, or remove models
-momos server         # manage the Ollama server
+momos server         # start or attach to the Ollama server
+momos help           # show available commands
 ```
 
 ## Supported Models
 
-| Model | Size | RAM Needed | Best For |
-|-------|------|------------|----------|
+| Model | Download Size | RAM Needed | Best For |
+|-------|--------------|------------|----------|
 | DeepSeek R1 1.5B | ~800MB | 2GB+ | Low-end devices, quick responses |
 | DeepSeek R1 7B | ~4GB | 4GB+ | Balanced performance |
 | DeepSeek R1 14B | ~8GB | 8GB+ | Higher quality output |
 | DeepSeek R1 32B | ~20GB | 12GB+ | Best quality, flagship devices |
 | Gemma 3 4B | ~2.5GB | 4GB+ | Google's efficient model |
 | Llama 3.2 3B | ~2GB | 3GB+ | Meta's compact model |
-| Any Ollama model | Varies | Varies | Enter any tag from [ollama.com/library](https://ollama.com/library) |
+
+You can also enter any model tag from [ollama.com/library](https://ollama.com/library) during setup.
 
 The installer auto-detects your RAM and highlights the recommended model.
 
@@ -52,18 +54,16 @@ The installer auto-detects your RAM and highlights the recommended model.
 > [!WARNING]
 > Do **not** install Termux from Google Play Store — it's outdated and will not work.
 
-## First-Time Termux Setup
+## New to Termux?
 
-If you've never used Termux before, run this single command — it handles everything:
+If you've never used Termux before, run this first — it updates Termux, installs essential tools (curl, wget, git), sets up storage access, and then offers to install MOMOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh | bash
 ```
 
-This will update Termux, install essential tools, configure storage access, and offer to install MOMOS automatically.
-
 <details>
-<summary>Manual setup (alternative)</summary>
+<summary>Manual Termux setup (if you prefer)</summary>
 
 ```bash
 pkg update && pkg upgrade -y
@@ -71,7 +71,7 @@ pkg install curl -y
 termux-setup-storage
 ```
 
-Then run the MOMOS install command above.
+Then run the MOMOS install command from the Quick Install section.
 </details>
 
 ## How It Works
@@ -80,7 +80,7 @@ Then run the MOMOS install command above.
 ┌─────────────────────────────────────────┐
 │  Termux (Android)                       │
 │  ┌───────────────────────────────────┐  │
-│  │  Debian 12 (via PRoot)            │  │
+│  │  Debian (via PRoot — no root)     │  │
 │  │  ┌─────────────────────────────┐  │  │
 │  │  │  Ollama Server (tmux)       │  │  │
 │  │  │  └─ Your AI Model          │  │  │
@@ -89,44 +89,43 @@ Then run the MOMOS install command above.
 └─────────────────────────────────────────┘
 ```
 
-MOMOS sets up a Debian container inside Termux using PRoot (no root needed), installs Ollama inside it, and manages everything through the `momos` command.
+MOMOS creates a Debian container inside Termux using PRoot (no root required), installs Ollama inside it, and manages everything through the `momos` command.
 
 ## Troubleshooting
 
 ### Installation fails
+
+Check the log:
+
 ```bash
 cat ~/.momos/install.log
 ```
-The full log is always saved. Share it when asking for help.
 
 ### "Permission denied"
+
 ```bash
 termux-setup-storage
 ```
+
 Then retry the install.
 
-### Model too slow / crashes
-Your device may not have enough RAM. Run `momos models` and switch to a smaller model:
+### Model too slow or crashes
+
+Your device may not have enough RAM. Switch to a smaller model:
+
 ```bash
 momos chat deepseek-r1:1.5b
 ```
 
 ### Ollama server not running
+
 ```bash
 momos server
 ```
+
 This will start or reattach to the server.
 
-### Start fresh
-```bash
-proot-distro remove debian
-rm -rf ~/.momos
-```
-Then run the install command again.
-
-## Manual Install (Alternative)
-
-If you prefer cloning the repo:
+## Alternative: Install from Source
 
 ```bash
 pkg install git -y
@@ -136,10 +135,18 @@ bash MOMOS/scripts/momos.sh
 
 ## Updating
 
-Re-run the install command — it's safe to run multiple times. It will skip steps that are already done and update what needs updating.
+Re-run the install command — it's safe to run multiple times. Already-completed steps are skipped automatically.
+
+## Uninstall
+
+```bash
+proot-distro remove debian
+rm -rf ~/.momos
+rm "$PREFIX/bin/momos"
+```
 
 ---
 
-**Enjoy AI on your phone! 🧠✨**
+MIT License · [View License](LICENSE)
 
-*Star this repo if it helped you ⭐*
+**Enjoy AI on your phone! 🧠✨**
