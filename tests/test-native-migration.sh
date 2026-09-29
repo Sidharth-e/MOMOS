@@ -227,6 +227,121 @@ fi
 
 # ---------------------------------------------------------------------------
 
+section "momos.sh — size formatting"
+
+fmt_case() {
+    local tmp
+    tmp=$(mktemp -d)
+    {
+        harness_preamble
+        extract_function "$MOMOS_SH" fmt_size
+        echo "fmt_size $1"
+    } > "$tmp/run.sh"
+    OUT=$(bash "$tmp/run.sh" 2>&1)
+    rm -rf "$tmp"
+}
+
+fmt_case 8192
+if [ "$OUT" = "8.0GB (8192MB)" ]; then
+    pass "8192MB renders as 8.0GB (8192MB)"
+else
+    fail "unexpected formatting: $OUT"
+fi
+
+fmt_case 7986
+if [ "$OUT" = "7.8GB (7986MB)" ]; then
+    pass "non-round RAM renders as 7.8GB (7986MB)"
+else
+    fail "unexpected formatting: $OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "momos.sh — storage detection (df portability)"
+
+# Reproduces the on-device failure: GNU df accepts -Pk, toybox rejects -P and
+# only answers to -k, and a broken df yields nothing usable.
+storage_case() {
+    local mode="$1" tmp
+    tmp=$(mktemp -d)
+
+    case "$mode" in
+        gnu)
+            cat > "$tmp/df" <<'STUB'
+#!/bin/bash
+echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
+echo "/dev/block/dm-5  128000000 40000000  88000000      32% /data"
+STUB
+            ;;
+        toybox)
+            cat > "$tmp/df" <<'STUB'
+#!/bin/bash
+for a in "$@"; do
+    if [ "$a" = "-Pk" ]; then
+        echo "df: Unknown option -P" >&2
+        exit 1
+    fi
+done
+echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
+echo "/dev/block/dm-5  128000000 40000000  88000000      32% /data"
+STUB
+            ;;
+        broken)
+            cat > "$tmp/df" <<'STUB'
+#!/bin/bash
+echo "df: something else went wrong" >&2
+exit 1
+STUB
+            ;;
+    esac
+    chmod +x "$tmp/df"
+
+    {
+        harness_preamble
+        echo "LOG_FILE=$tmp/diag.log"
+        extract_function "$MOMOS_SH" is_number
+        extract_function "$MOMOS_SH" log_storage_diagnostics
+        extract_function "$MOMOS_SH" get_free_storage_mb
+        echo 'echo "MB=$(get_free_storage_mb)"'
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    DIAG="$(cat "$tmp/diag.log" 2>/dev/null || true)"
+    rm -rf "$tmp"
+}
+
+# 88000000 KB / 1024 = 85937 MB
+storage_case gnu
+if grep -q "MB=85937" <<< "$OUT"; then
+    pass "GNU df (-Pk) parses correctly"
+else
+    fail "GNU df should yield 85937MB, got: $OUT"
+fi
+
+storage_case toybox
+if grep -q "MB=85937" <<< "$OUT"; then
+    pass "toybox df (rejects -Pk) falls back to -k"
+else
+    fail "toybox df should fall back to -k and yield 85937MB, got: $OUT"
+fi
+
+storage_case broken
+if grep -q "MB=0" <<< "$OUT"; then
+    pass "unusable df reports 0 rather than a bogus number"
+else
+    fail "broken df should report 0, got: $OUT"
+fi
+
+if grep -q "storage detection failed" <<< "$DIAG"; then
+    pass "failed detection writes diagnostics to the log"
+else
+    fail "failed detection should log diagnostics for the device"
+fi
+
+# ---------------------------------------------------------------------------
+
 section "repo layout"
 
 if [ -f "$LEGACY_SH" ] && [ -f "$REPO_ROOT/scripts/legacy/proot/setup.sh" ]; then

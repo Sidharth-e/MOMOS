@@ -59,16 +59,60 @@ get_arch() {
     uname -m
 }
 
+is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Render a megabyte count as GB with the exact MB alongside, since vendors
+# round capacity and the raw number is what actually matters for model fit.
+fmt_size() {
+    awk -v mb="$1" 'BEGIN { printf "%.1fGB (%dMB)", mb / 1024, mb }'
+}
+
 get_ram_mb() {
     local mem
     mem=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print int($2/1024)}' || true)
     echo "${mem:-0}"
 }
 
+# `df -m` is a GNU coreutils flag. Termux only has GNU df when something
+# pulled in coreutils; otherwise /system/bin/df (toybox) handles it and
+# rejects -m. So try the portable flag sets in turn and take the first that
+# yields a number. All three report 1K blocks.
 get_free_storage_mb() {
-    local storage
-    storage=$(df -m "$HOME" 2>/dev/null | awk 'NR==2{print $4}' || true)
-    echo "${storage:-0}"
+    local kb
+
+    kb=$(df -Pk "$HOME" 2>/dev/null | awk 'END { print $4 }')
+    if ! is_number "$kb"; then
+        kb=$(df -k "$HOME" 2>/dev/null | awk 'END { print $4 }')
+    fi
+    if ! is_number "$kb"; then
+        kb=$(df "$HOME" 2>/dev/null | awk 'END { print $4 }')
+    fi
+
+    if ! is_number "$kb"; then
+        log_storage_diagnostics
+        echo 0
+        return
+    fi
+
+    echo $((kb / 1024))
+}
+
+# Record what df actually did, so an undetectable device is diagnosable
+# instead of just reporting a bare warning.
+log_storage_diagnostics() {
+    {
+        echo "--- storage detection failed at $(date '+%F %T') ---"
+        echo "\$ command -v df: $(command -v df 2>&1)"
+        echo "\$ df -Pk \$HOME:"; df -Pk "$HOME" 2>&1
+        echo "\$ df -k \$HOME:";  df -k "$HOME" 2>&1
+        echo "\$ df \$HOME:";     df "$HOME" 2>&1
+        echo "\$ df -h \$HOME:";  df -h "$HOME" 2>&1
+    } >> "$LOG_FILE" 2>&1
 }
 
 check_internet() {
@@ -146,17 +190,17 @@ preflight() {
 
     RAM_MB=$(get_ram_mb)
     if [ "$RAM_MB" -gt 0 ]; then
-        success "RAM: ${RAM_MB}MB"
+        success "RAM: $(fmt_size "$RAM_MB")"
     else
         warn "Could not detect RAM — model recommendations may be inaccurate"
         RAM_MB=3000
     fi
 
     STORAGE_MB=$(get_free_storage_mb)
-    if [ -n "$STORAGE_MB" ] && [ "$STORAGE_MB" -gt 0 ]; then
-        success "Free storage: ${STORAGE_MB}MB"
+    if [ "$STORAGE_MB" -gt 0 ]; then
+        success "Free storage: $(fmt_size "$STORAGE_MB")"
     else
-        warn "Could not detect free storage"
+        warn "Could not detect free storage — continuing (details in $LOG_FILE)"
         STORAGE_MB=99999
     fi
 
@@ -227,7 +271,7 @@ select_model() {
     esac
 
     if [ "$needed_mb" -gt 0 ] && [ "$STORAGE_MB" -lt "$needed_mb" ]; then
-        fail "Not enough storage. ${SELECTED_MODEL} needs ~${needed_mb}MB but only ${STORAGE_MB}MB free."
+        fail "Not enough storage. ${SELECTED_MODEL} needs ~$(fmt_size "$needed_mb") but only $(fmt_size "$STORAGE_MB") free."
         exit 1
     fi
 
