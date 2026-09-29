@@ -15,6 +15,16 @@ NC='\033[0m'
 LOG_DIR="$HOME/.momos"
 LOG_FILE="$LOG_DIR/setup.log"
 
+# Which ref the scripts fetch from. Override to install or test a branch:
+#   MOMOS_BRANCH=my-branch bash -c "$(curl -fsSL .../my-branch/scripts/setup.sh)"
+# Exported so the launcher and any child script inherit the same ref.
+MOMOS_BRANCH="${MOMOS_BRANCH:-main}"
+export MOMOS_BRANCH
+MOMOS_RAW="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${MOMOS_BRANCH}"
+NATIVE_INSTALL_URL="${MOMOS_RAW}/scripts/momos.sh"
+LEGACY_INSTALL_URL="${MOMOS_RAW}/scripts/legacy/proot/momos.sh"
+LEGACY_ROOTFS="$PREFIX/var/lib/proot-distro/installed-rootfs/debian"
+
 mkdir -p "$LOG_DIR"
 
 log() { echo "[$(date '+%H:%M:%S')] $*" >> "$LOG_FILE"; }
@@ -50,9 +60,10 @@ check_termux() {
         fail "Not running inside Termux."
         echo ""
         echo -e "${WHITE}Install Termux from:${NC}"
-        echo -e "  ${CYAN}Google Play Store${NC}"
         echo -e "  ${CYAN}F-Droid:${NC}  https://f-droid.org/packages/com.termux/"
         echo -e "  ${CYAN}GitHub:${NC}   https://github.com/termux/termux-app/releases"
+        echo ""
+        echo -e "${DIM}Avoid the Play Store build — it is out of date.${NC}"
         exit 1
     fi
     success "Termux environment detected"
@@ -65,6 +76,21 @@ check_internet() {
         return 0
     fi
     return 1
+}
+
+# The native Ollama package is 64-bit only. A 64-bit phone running a 32-bit
+# Termux reports `armv8l`, which looks 64-bit but cannot install the aarch64
+# package — so only the literal aarch64/x86_64 values count.
+detect_arch() {
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        aarch64|x86_64)
+            NATIVE_OK=1
+            ;;
+        *)
+            NATIVE_OK=0
+            ;;
+    esac
 }
 
 setup_storage() {
@@ -107,24 +133,98 @@ install_essentials() {
     fi
 }
 
+install_native() {
+    echo ""
+    info "Launching the native installer..."
+    echo ""
+    bash -c "$(curl -fsSL "$NATIVE_INSTALL_URL")"
+}
+
+install_legacy() {
+    echo ""
+    warn "The legacy installer sets up a Debian container via PRoot."
+    echo -e "${DIM}It needs roughly 1-2GB more storage and may run more slowly,${NC}"
+    echo -e "${DIM}but it works on devices the native package does not support.${NC}"
+    echo ""
+    info "Launching the legacy installer..."
+    echo ""
+    bash -c "$(curl -fsSL "$LEGACY_INSTALL_URL")"
+}
+
+choose_method() {
+    echo -e "${WHITE}${BOLD}How would you like to install MOMOS?${NC}"
+    echo ""
+
+    local default=""
+
+    if [ "$NATIVE_OK" -eq 1 ]; then
+        printf "  ${CYAN}[1]${NC} %-24s ${DIM}%s${NC}\n" "Recommended — Native" "no container, ~1-2GB smaller, faster"
+        printf "  ${CYAN}[2]${NC} %-24s ${DIM}%s${NC}\n" "Legacy — PRoot" "Debian container; fallback option"
+        echo ""
+        echo -e "  ${GREEN}Native Ollama supports your device (${ARCH}).${NC}"
+        default="1"
+    else
+        echo -e "  ${DIM}[1]  Unavailable — Native  (requires a 64-bit device)${NC}"
+        printf "  ${CYAN}[2]${NC} %-24s ${DIM}%s${NC}\n" "Legacy — PRoot" "works on 32-bit devices"
+        echo ""
+        echo -e "  ${YELLOW}This device reports '${ARCH}', so native Ollama is not available.${NC}"
+        echo -e "  ${DIM}The legacy PRoot method is selected by default.${NC}"
+        default="2"
+    fi
+
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice [1-2] (default=$default): ${NC}")" choice < /dev/tty
+    choice="${choice:-$default}"
+
+    case "$choice" in
+        1)
+            if [ "$NATIVE_OK" -eq 1 ]; then
+                install_native
+            else
+                warn "Native is not available on this device — using the legacy method."
+                install_legacy
+            fi
+            ;;
+        2) install_legacy ;;
+        *)
+            warn "Invalid choice — using the default."
+            if [ "$NATIVE_OK" -eq 1 ]; then install_native; else install_legacy; fi
+            ;;
+    esac
+}
+
 update_momos() {
     header
     info "Updating MOMOS..."
-    bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)" bash --update
+
+    if [ -d "$LEGACY_ROOTFS" ]; then
+        bash -c "$(curl -fsSL "$LEGACY_INSTALL_URL")" bash --update
+    else
+        bash -c "$(curl -fsSL "$NATIVE_INSTALL_URL")" bash --update
+    fi
 }
 
 uninstall_momos() {
     header
     echo -e "${YELLOW}Uninstalling MOMOS...${NC}"
     echo ""
-    read -rp "$(echo -e "${YELLOW}Are you sure you want to uninstall MOMOS? This will remove all downloaded models and Debian container [y/N]: ${NC}")" confirm < /dev/tty
+    read -rp "$(echo -e "${YELLOW}Are you sure you want to uninstall MOMOS? This removes all downloaded models [y/N]: ${NC}")" confirm < /dev/tty
     case "$confirm" in
         [yY]|[yY][eE][sS])
             info "Stopping Ollama server..."
+            pkill -f "ollama serve" 2>/dev/null || true
             proot-distro login debian --shared-tmp -- tmux kill-session -t ollama_server 2>/dev/null || true
-            pkill -f "ollama" 2>/dev/null || true
-            info "Removing Debian container..."
-            proot-distro remove debian 2>/dev/null || true
+
+            if [ -d "$LEGACY_ROOTFS" ]; then
+                info "Removing Debian container..."
+                proot-distro remove debian 2>/dev/null || true
+            fi
+
+            if command -v ollama > /dev/null 2>&1; then
+                info "Removing Ollama..."
+                pkg uninstall -y ollama 2>/dev/null || true
+            fi
+
             info "Removing MOMOS configuration and state..."
             rm -rf "$LOG_DIR"
             info "Removing launcher..."
@@ -144,6 +244,7 @@ prompt_momos() {
     echo -e "${WHITE}${BOLD}Termux is ready!${NC}"
     echo ""
     echo -e "${DIM}────────────────────────────────────${NC}"
+
     if [ -f "$PREFIX/bin/momos" ]; then
         echo -e "  MOMOS is already installed."
         echo ""
@@ -156,9 +257,7 @@ prompt_momos() {
         choice="${choice:-1}"
         case "$choice" in
             1) update_momos ;;
-            2)
-                bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)"
-                ;;
+            2) choose_method ;;
             3) uninstall_momos ;;
             *) finish_standalone ;;
         esac
@@ -173,10 +272,7 @@ prompt_momos() {
         choice="${choice:-1}"
 
         if [ "$choice" = "1" ]; then
-            echo ""
-            info "Launching MOMOS installer..."
-            echo ""
-            bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)"
+            choose_method
         else
             finish_standalone
         fi
@@ -193,7 +289,7 @@ finish_standalone() {
     echo -e "    ${GREEN}✓${NC} curl, wget, git"
     echo ""
     echo -e "  ${WHITE}To install MOMOS later:${NC}"
-    echo -e "    ${CYAN}bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)\"${NC}"
+    echo -e "    ${CYAN}bash -c \"\$(curl -fsSL $NATIVE_INSTALL_URL)\"${NC}"
     echo ""
     echo -e "  ${DIM}Logs: $LOG_FILE${NC}"
     echo ""
@@ -224,6 +320,8 @@ main() {
         exit 1
     fi
     success "Internet connectivity"
+
+    detect_arch
 
     echo ""
     echo -e "${BLUE}Setting up Termux${NC}"
