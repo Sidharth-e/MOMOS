@@ -27,6 +27,8 @@ FAIL=0
 # command substitution so the exit status survives out of the subshell.
 OUT=""
 RUN_STATUS=0
+DIAG=""
+FETCHED=""
 
 pass() { printf '  \033[0;32m✓\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 fail() { printf '  \033[0;31m✗\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
@@ -338,6 +340,75 @@ if grep -q "storage detection failed" <<< "$DIAG"; then
     pass "failed detection writes diagnostics to the log"
 else
     fail "failed detection should log diagnostics for the device"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — which ref does 'momos update' follow?"
+
+# The launcher's own cmd_update is the copy that actually ships, since it lives
+# inside the heredoc written to $PREFIX/bin/momos (the heredoc body sits at
+# column 0, so it extracts like any other function).
+update_ref_case() {
+    local recorded="$1" env_branch="$2" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    if [ -n "$recorded" ]; then
+        echo "$recorded" > "$tmp/home/.momos/branch"
+    fi
+
+    cat > "$tmp/curl" <<'STUB'
+#!/bin/bash
+echo "$@" >> "$CURL_LOG"
+exit 0
+STUB
+    cat > "$tmp/pkg" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+    chmod +x "$tmp/curl" "$tmp/pkg"
+
+    {
+        echo "HOME=$tmp/home"
+        echo 'LOG_DIR=$HOME/.momos'
+        if [ -n "$env_branch" ]; then
+            echo "MOMOS_BRANCH='$env_branch'"
+        fi
+        extract_function "$MOMOS_SH" cmd_update
+        echo 'cmd_update'
+    } > "$tmp/run.sh"
+
+    CURL_LOG="$tmp/curl.log" PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    FETCHED="$(cat "$tmp/curl.log" 2>/dev/null || true)"
+    rm -rf "$tmp"
+}
+
+# The point of the branch file: a branch install must not quietly snap back to
+# main on the next update.
+update_ref_case "feat/cross-device-access" ""
+if grep -q "feat/cross-device-access/scripts/momos.sh" <<< "$FETCHED"; then
+    pass "update follows the recorded branch"
+else
+    fail "update should follow the recorded branch, fetched: $FETCHED"
+fi
+
+# A pre-branch install has no branch file and must still work.
+update_ref_case "" ""
+if grep -q "main/scripts/momos.sh" <<< "$FETCHED"; then
+    pass "update falls back to main when no branch was recorded"
+else
+    fail "update should fall back to main, fetched: $FETCHED"
+fi
+
+# An explicit MOMOS_BRANCH wins, so a branch can be switched deliberately.
+update_ref_case "main" "feat/cross-device-access"
+if grep -q "feat/cross-device-access/scripts/momos.sh" <<< "$FETCHED"; then
+    pass "MOMOS_BRANCH overrides the recorded branch"
+else
+    fail "MOMOS_BRANCH should override the recorded branch, fetched: $FETCHED"
 fi
 
 # ---------------------------------------------------------------------------
