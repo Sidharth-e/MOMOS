@@ -411,6 +411,78 @@ else
     fail "MOMOS_BRANCH should override the recorded branch, fetched: $FETCHED"
 fi
 
+# Getting the URL right is only half of it. The installer that cmd_update
+# spawns resolves the ref for itself, and if it is not told which one, it
+# defaults to main and writes main back into the branch file — quietly undoing
+# the record on the very next update. These lines are lifted from the real
+# script so this test cannot drift away from what actually runs.
+installer_ref_lines() {
+    grep -m1 '^MOMOS_BRANCH=' "$MOMOS_SH"
+    grep -m1 '^export MOMOS_BRANCH' "$MOMOS_SH"
+    grep -m1 '^MOMOS_RAW=' "$MOMOS_SH"
+    grep -m1 'echo "\$MOMOS_BRANCH" > "\$LOG_DIR/branch"' "$MOMOS_SH" | sed 's/^[[:space:]]*//'
+}
+
+update_propagation_case() {
+    local recorded="$1" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+    echo "$recorded" > "$tmp/home/.momos/branch"
+
+    # Stands in for the fetched installer: same ref resolution, same recording.
+    {
+        echo '#!/bin/bash'
+        echo 'LOG_DIR=$HOME/.momos'
+        installer_ref_lines
+        echo 'echo "INSTALLER_SAW=${MOMOS_BRANCH}"'
+        echo 'echo "INSTALLER_FETCHED=${MOMOS_RAW}/scripts/ui/index.html"'
+    } > "$tmp/installer.bin"
+
+    cat > "$tmp/curl" <<STUB
+#!/bin/bash
+cat "$tmp/installer.bin"
+STUB
+    cat > "$tmp/pkg" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+    chmod +x "$tmp/curl" "$tmp/pkg"
+
+    {
+        echo "HOME=$tmp/home"
+        echo "LOG_DIR=$tmp/home/.momos"
+        extract_function "$MOMOS_SH" cmd_update
+        echo 'cmd_update'
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    RECORDED_AFTER="$(cat "$tmp/home/.momos/branch" 2>/dev/null || echo '<missing>')"
+    rm -rf "$tmp"
+}
+
+update_propagation_case "feat/cross-device-access"
+if grep -qx "INSTALLER_SAW=feat/cross-device-access" <<< "$OUT"; then
+    pass "the installer cmd_update spawns is told which ref to use"
+else
+    fail "installer defaulted to the wrong ref: $(grep INSTALLER_SAW <<< "$OUT" || echo '<no output>')"
+fi
+
+if [ "$RECORDED_AFTER" = "feat/cross-device-access" ]; then
+    pass "update does not rewrite the recorded branch"
+else
+    fail "update clobbered the recorded branch with '$RECORDED_AFTER'"
+fi
+
+# Main is the correct fallback, and must survive being recorded as itself.
+update_propagation_case "main"
+if grep -qx "INSTALLER_SAW=main" <<< "$OUT" && [ "$RECORDED_AFTER" = "main" ]; then
+    pass "update keeps main when main is the recorded ref"
+else
+    fail "main case wrong: saw=$(grep INSTALLER_SAW <<< "$OUT") recorded=$RECORDED_AFTER"
+fi
+
 # ---------------------------------------------------------------------------
 
 section "launcher — web UI (port, LAN address, static server)"

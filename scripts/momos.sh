@@ -738,7 +738,10 @@ cmd_update() {
     url="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${branch}/scripts/momos.sh"
     echo "Updating MOMOS (ref: ${branch})..."
     pkg upgrade -y ollama >> "$LOG_DIR/install.log" 2>&1 || true
-    bash -c "$(curl -fsSL "$url")" bash --update
+    # Pass the ref down. The installer resolves MOMOS_BRANCH for itself and
+    # records it, so without this it would default to main and overwrite the
+    # branch file — dropping the install back onto main after one update.
+    MOMOS_BRANCH="$branch" bash -c "$(curl -fsSL "$url")" bash --update
 }
 
 cmd_uninstall() {
