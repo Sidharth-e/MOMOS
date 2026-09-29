@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>MOMOS — web ui</title>
+<!--
+  Placeholder page for `momos ui`.
+
+  Deliberately self-contained: no external stylesheet, font or script. It is
+  served off a phone that may have no network of its own, so anything fetched
+  from a CDN would be the one thing on the page that fails.
+
+  The only live element is the address the browser arrived on, read from
+  location — no request is made, so this page cannot break on CORS.
+-->
+<style>
+  :root {
+    --paper:     #070b0e;  /* unlit tube */
+    --panel:     #0c1317;
+    --line:      #1e2c31;
+    --text:      #c6d4d2;
+    --muted:     #7d8e92;  /* the DIM attribute */
+    --phosphor:  #6fe3d2;  /* ANSI cyan */
+    --amber:     #e8b75c;  /* ANSI yellow, used once */
+
+    --mono: ui-monospace, "SF Mono", "Roboto Mono", "DejaVu Sans Mono",
+            Menlo, Consolas, "Liberation Mono", monospace;
+
+    --step-0: 0.8125rem;
+    --step-1: 0.9375rem;
+    --step-2: clamp(1.75rem, 9vw, 2.75rem);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: clamp(1.5rem, 6vw, 4rem) 16px;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--paper);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: var(--step-1);
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .shell {
+    width: 100%;
+    max-width: 62ch;
+  }
+
+  /* The project's banner, rebuilt as a real box. Terminals have no rounded
+     corners, so neither does this. */
+  .frame {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: clamp(1.25rem, 5vw, 2rem);
+    margin-bottom: 2rem;
+  }
+
+  .wordmark {
+    margin: 0;
+    font-size: var(--step-2);
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    line-height: 1.1;
+    color: var(--phosphor);
+    /* The tracking pushes the last letter off-centre; pull it back. */
+    margin-right: -0.22em;
+  }
+
+  .subtitle {
+    margin: 0.5rem 0 0;
+    font-size: var(--step-1);
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  .lede {
+    margin: 0 0 2rem;
+    max-width: 56ch;
+  }
+
+  .report {
+    margin: 0 0 2rem;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1.5rem;
+    font-size: var(--step-0);
+  }
+
+  .report dt {
+    color: var(--muted);
+  }
+
+  .report dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .report dd.live {
+    color: var(--phosphor);
+  }
+
+  .notice {
+    margin: 0 0 2rem;
+    padding-left: 0.9rem;
+    border-left: 2px solid var(--amber);
+    font-size: var(--step-0);
+    color: var(--muted);
+    max-width: 54ch;
+  }
+
+  .notice strong {
+    color: var(--amber);
+    font-weight: 600;
+  }
+
+  /* Where the chat interface will be. A prompt with nothing typed yet is the
+     honest picture of this page's state. */
+  .next {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--step-0);
+  }
+
+  .next .prompt {
+    color: var(--phosphor);
+    margin-right: 0.6ch;
+  }
+
+  .cursor {
+    display: inline-block;
+    width: 0.6em;
+    height: 1.05em;
+    margin-left: 0.25em;
+    background: var(--phosphor);
+    vertical-align: text-bottom;
+    animation: blink 1.15s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 60%   { opacity: 1; }
+    61%, 100% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor { animation: none; }
+  }
+
+  a {
+    color: var(--phosphor);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--phosphor);
+    outline-offset: 3px;
+  }
+
+  /* One narrow column: the labels stack above their values rather than
+     squeezing both onto a 375px screen. */
+  @media (max-width: 30rem) {
+    .report { grid-template-columns: 1fr; gap: 0; }
+    .report dd { margin-bottom: 0.6rem; }
+  }
+</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="frame">
+      <h1 class="wordmark">MOMOS</h1>
+      <p class="subtitle">web ui</p>
+    </header>
+
+    <p class="lede">
+      This page is a placeholder. The server, the port and the network path
+      all work — what belongs here is the chat interface.
+    </p>
+
+    <dl class="report">
+      <dt>reached at</dt>
+      <dd class="live" id="host">checking&hellip;</dd>
+
+      <dt>this phone</dt>
+      <dd id="reach">checking&hellip;</dd>
+
+      <dt>ollama</dt>
+      <dd>running on the phone at 127.0.0.1:11434</dd>
+    </dl>
+
+    <p class="notice">
+      <strong>No login.</strong> Anyone on this Wi-Fi who has the address can
+      open this page. Stop it with Ctrl+C in Termux when you are done.
+    </p>
+
+    <p class="next">
+      <span class="prompt">&gt;</span>chat interface goes here<span class="cursor" aria-hidden="true"></span>
+    </p>
+  </main>
+
+  <script>
+    (function () {
+      var host = document.getElementById('host');
+      var reach = document.getElementById('reach');
+
+      // location.host is exactly what this browser dialled, which is the one
+      // fact worth confirming: it proves which address actually resolves.
+      host.textContent = location.host || 'unknown';
+
+      var name = location.hostname;
+      var onPhone = name === 'localhost' || name === '127.0.0.1' || name === '::1' || name === '[::1]';
+
+      reach.textContent = onPhone
+        ? 'you are on the phone itself; other devices need the network address'
+        : 'reachable from other devices on this Wi-Fi';
+    })();
+  </script>
+</body>
+</html>

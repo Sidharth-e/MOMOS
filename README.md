@@ -81,6 +81,35 @@ momos logs                       # View live Ollama server output (Ctrl+C to exi
 > [!NOTE]
 > The Ollama server starts automatically in the background when running `momos chat` or managing models. You only need `momos logs` if you want to inspect server output directly.
 
+### Web UI
+
+```bash
+momos ui                         # Serve on port 8080
+momos ui 9000                    # Serve on a different port
+```
+
+The UI is served to your Wi-Fi, so you can open it from a laptop at the network
+address it prints:
+
+```
+MOMOS UI
+
+  Phone:   http://localhost:8080
+  Network: http://192.168.1.42:8080   <- open this on your laptop
+```
+
+> [!WARNING]
+> The port has no authentication — anyone on your Wi-Fi who has the address can
+> open the page. Stop it with Ctrl+C when you are done.
+
+> [!NOTE]
+> This is a placeholder page for now — it confirms the server, the port and the
+> network path all work. The chat interface is not built yet.
+
+`momos ui` uses [darkhttpd](https://github.com/emikulic/darkhttpd) (about 1MB),
+installing it on first use. If darkhttpd is unavailable it falls back to
+`python3 -m http.server` instead.
+
 ### Update & Uninstall
 ```bash
 momos update                     # Update MOMOS scripts and Ollama

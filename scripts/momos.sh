@@ -16,6 +16,7 @@ NC='\033[0m'
 LOG_DIR="$HOME/.momos"
 LOG_FILE="$LOG_DIR/install.log"
 STATE_FILE="$LOG_DIR/state"
+UI_DIR="$LOG_DIR/ui"
 LAUNCHER_PATH="$PREFIX/bin/momos"
 OLLAMA_URL="http://127.0.0.1:11434"
 
@@ -360,6 +361,7 @@ set -euo pipefail
 LOG_DIR="$HOME/.momos"
 STATE_FILE="$LOG_DIR/state"
 SERVER_LOG="$LOG_DIR/server.log"
+UI_DIR="$LOG_DIR/ui"
 OLLAMA_URL="http://127.0.0.1:11434"
 
 MODEL=""
@@ -395,6 +397,162 @@ ensure_server() {
     fi
 }
 
+is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Below 1024 is privileged, and Termux runs as an ordinary app.
+valid_port() {
+    local port="${1:-}"
+    is_number "$port" || return 1
+    [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]
+}
+
+# Four numeric octets, each 0-255.
+is_ipv4() {
+    local ip="${1:-}" octet
+    local -a octets
+
+    [ -n "$ip" ] || return 1
+
+    # read -a with a local IFS makes the split explicit; bare $ip would rely on
+    # word splitting.
+    IFS=. read -ra octets <<< "$ip"
+    [ "${#octets[@]}" -eq 4 ] || return 1
+
+    for octet in "${octets[@]}"; do
+        case "$octet" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        [ "$octet" -le 255 ] || return 1
+    done
+
+    return 0
+}
+
+# The address a laptop has to dial to reach this phone. Which tool can answer
+# varies — net-tools and iproute2 are both optional in Termux, and Android
+# keeps its own `ip` in /system/bin — so ask each in turn. Returning nothing is
+# deliberate: a guessed address would send the user to a dead URL with no clue
+# why, which is worse than being told it could not be determined.
+lan_ip() {
+    local bin out addr
+
+    for bin in ip /system/bin/ip; do
+        command -v "$bin" > /dev/null 2>&1 || continue
+
+        out=$("$bin" -4 route get 1.1.1.1 2>/dev/null || true)
+        addr=$(sed -n 's/.* src \([0-9.]*\).*/\1/p' <<< "$out" | head -n1 || true)
+        if is_ipv4 "$addr"; then
+            echo "$addr"
+            return 0
+        fi
+
+        out=$("$bin" -4 addr show 2>/dev/null || true)
+        addr=$(sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' <<< "$out" \
+            | grep -v '^127\.' | head -n1 || true)
+        if is_ipv4 "$addr"; then
+            echo "$addr"
+            return 0
+        fi
+    done
+
+    # toybox spells it `inet addr:`, net-tools and BSD spell it `inet `. The
+    # optional group is \{0,1\} rather than \?: \? is a GNU extension that BSD
+    # sed silently ignores, leaving the whole substitution unmatched.
+    out=$(ifconfig 2>/dev/null || true)
+    addr=$(sed -n 's/.*inet \(addr:\)\{0,1\}\([0-9.]*\).*/\2/p' <<< "$out" \
+        | grep -v '^127\.' | head -n1 || true)
+    if is_ipv4 "$addr"; then
+        echo "$addr"
+        return 0
+    fi
+
+    return 1
+}
+
+# Termux ships no web server. darkhttpd is about 1MB and serves static files,
+# which is all this page needs; python would be roughly 40MB competing with the
+# models for space on the same device. Prefer whatever is already installed.
+httpd_kind() {
+    if command -v darkhttpd > /dev/null 2>&1; then
+        echo darkhttpd
+    elif command -v python3 > /dev/null 2>&1; then
+        echo python3
+    else
+        echo ""
+    fi
+}
+
+install_httpd() {
+    local kind
+    kind=$(httpd_kind)
+    if [ -n "$kind" ]; then
+        echo "$kind"
+        return 0
+    fi
+
+    echo "Installing darkhttpd (static file server, ~1MB)..."
+    if pkg install -y darkhttpd >> "$LOG_DIR/install.log" 2>&1 \
+        && command -v darkhttpd > /dev/null 2>&1; then
+        echo darkhttpd
+        return 0
+    fi
+
+    echo "darkhttpd is not available — falling back to python (~40MB)."
+    if pkg install -y python >> "$LOG_DIR/install.log" 2>&1 \
+        && command -v python3 > /dev/null 2>&1; then
+        echo python3
+        return 0
+    fi
+
+    return 1
+}
+
+# The page lives on the device so the UI works with no network; a missing file
+# is re-fetched from the same ref the rest of the CLI follows.
+ensure_ui_files() {
+    mkdir -p "$UI_DIR"
+
+    if [ -f "$UI_DIR/index.html" ]; then
+        return 0
+    fi
+
+    local branch url
+    branch=$(cat "$LOG_DIR/branch" 2>/dev/null || echo main)
+    branch="${MOMOS_BRANCH:-$branch}"
+    url="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${branch}/scripts/ui/index.html"
+
+    echo "Fetching the UI page..."
+    if ! curl -fsSL "$url" -o "$UI_DIR/index.html"; then
+        rm -f "$UI_DIR/index.html"
+        echo "Could not download the UI page:"
+        echo "  $url"
+        exit 1
+    fi
+}
+
+# Foreground, so only one extra process is ever running alongside the models.
+serve_ui() {
+    local kind="$1" port="$2"
+
+    case "$kind" in
+        darkhttpd)
+            exec darkhttpd "$UI_DIR" --port "$port" --addr 0.0.0.0
+            ;;
+        python3)
+            exec python3 -m http.server "$port" --bind 0.0.0.0 --directory "$UI_DIR"
+            ;;
+        *)
+            echo "No static file server available."
+            return 1
+            ;;
+    esac
+}
+
 show_help() {
     echo "╭──────────────────────────────────────────╮"
     echo "│   MOMOS — Mobile Models Ollama Setup     │"
@@ -404,6 +562,7 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  chat [model]          Start chatting (default: last used model)"
+    echo "  ui [port]             Serve the web UI on your network (default port 8080)"
     echo "  serve                 Run the Ollama server in the foreground"
     echo "  models list           Show all installed models"
     echo "  models pull <name>    Download a new model"
@@ -416,6 +575,8 @@ show_help() {
     echo "Examples:"
     echo "  momos chat                       Chat with last used model"
     echo "  momos chat deepseek-r1:1.5b      Chat with a specific model"
+    echo "  momos ui                         Serve the web UI on port 8080"
+    echo "  momos ui 9000                    Serve it on port 9000 instead"
     echo "  momos models list                See what's installed"
     echo "  momos models pull qwen2.5:3b     Download Qwen 2.5 3B"
     echo "  momos models delete llama3.2:3b  Remove a model"
@@ -441,6 +602,50 @@ cmd_chat() {
     echo "$target" > "$STATE_FILE"
     ensure_server
     ollama run "$target"
+}
+
+cmd_ui() {
+    local port="${1:-8080}"
+
+    if ! valid_port "$port"; then
+        echo "Invalid port: ${1:-}"
+        echo ""
+        echo "Usage: momos ui [port]"
+        echo "  port must be 1024-65535 (default 8080)"
+        exit 1
+    fi
+
+    ensure_ui_files
+
+    local kind
+    if ! kind=$(install_httpd); then
+        echo "Could not find or install a static file server."
+        exit 1
+    fi
+
+    local lan
+    lan=$(lan_ip || true)
+
+    echo "MOMOS UI"
+    echo ""
+    echo "  Phone:   http://localhost:${port}"
+    if [ -n "$lan" ]; then
+        echo "  Network: http://${lan}:${port}   <- open this on your laptop"
+    else
+        echo "  Network: http://<phone-ip>:${port}   (could not detect this phone's address)"
+    fi
+    echo ""
+    echo "  Anyone on your Wi-Fi can reach this page — it has no login."
+    echo "  Ctrl+C to stop."
+    echo ""
+
+    # Skip the browser when there is no browser to open: termux-open-url is
+    # only present with termux-tools, and tests set MOMOS_UI_NO_OPEN.
+    if [ -z "${MOMOS_UI_NO_OPEN:-}" ] && command -v termux-open-url > /dev/null 2>&1; then
+        termux-open-url "http://localhost:${port}" > /dev/null 2>&1 || true
+    fi
+
+    serve_ui "$kind" "$port"
 }
 
 cmd_serve() {
@@ -579,41 +784,44 @@ cmd_menu() {
     echo "╰──────────────────────────╯"
     echo ""
     echo "  [1] Chat with AI"
-    echo "  [2] List models"
-    echo "  [3] Pull a new model"
-    echo "  [4] Delete a model"
-    echo "  [5] View server logs"
-    echo "  [6] Update MOMOS"
-    echo "  [7] Uninstall MOMOS"
-    echo "  [8] Help"
-    echo "  [9] Exit"
+    echo "  [2] Open the web UI"
+    echo "  [3] List models"
+    echo "  [4] Pull a new model"
+    echo "  [5] Delete a model"
+    echo "  [6] View server logs"
+    echo "  [7] Update MOMOS"
+    echo "  [8] Uninstall MOMOS"
+    echo "  [9] Help"
+    echo "  [10] Exit"
     echo ""
-    read -rp "Choice [1-9]: " pick
+    read -rp "Choice [1-10]: " pick
     case "$pick" in
         1) cmd_chat "$@" ;;
-        2) cmd_models list ;;
-        3)
+        2) cmd_ui ;;
+        3) cmd_models list ;;
+        4)
             read -rp "Model to pull (e.g. qwen2.5:3b): " pull_name
             if [ -n "$pull_name" ]; then
                 cmd_models pull "$pull_name"
             fi
             ;;
-        4)
+        5)
             read -rp "Model to delete: " del_name
             if [ -n "$del_name" ]; then
                 cmd_models delete "$del_name"
             fi
             ;;
-        5) cmd_logs ;;
-        6) cmd_update ;;
-        7) cmd_uninstall ;;
-        8) show_help ;;
+        6) cmd_logs ;;
+        7) cmd_update ;;
+        8) cmd_uninstall ;;
+        9) show_help ;;
         *) exit 0 ;;
     esac
 }
 
 case "${1:-}" in
     chat)      shift; cmd_chat "$@" ;;
+    ui)        shift; cmd_ui "$@" ;;
     serve)     cmd_serve ;;
     stop)      cmd_stop ;;
     models)    shift; cmd_models "$@" ;;
@@ -627,6 +835,25 @@ LAUNCHER_HEADER
 
     chmod +x "$LAUNCHER_PATH"
     success "Installed 'momos' command"
+
+    # Called from here rather than main() so that `momos update` refreshes the
+    # page as well — both paths go through this function.
+    install_ui
+}
+
+# The page ships in the repo and is fetched to the device so `momos ui` works
+# with no network. A failure here is not fatal: the launcher re-fetches it the
+# first time the UI is actually started.
+install_ui() {
+    local url="$MOMOS_RAW/scripts/ui/index.html"
+    mkdir -p "$UI_DIR"
+
+    if curl -fsSL "$url" -o "$UI_DIR/index.html"; then
+        success "Installed web UI page"
+    else
+        rm -f "$UI_DIR/index.html"
+        warn "Could not download the web UI page — 'momos ui' will retry when you run it"
+    fi
 }
 
 finish() {
@@ -642,6 +869,10 @@ finish() {
     echo -e "    ${CYAN}momos models list${NC}          ${DIM}see installed models${NC}"
     echo -e "    ${CYAN}momos models pull <name>${NC}   ${DIM}download a new model${NC}"
     echo -e "    ${CYAN}momos models delete <name>${NC} ${DIM}remove a model${NC}"
+    echo ""
+    echo -e "  ${WHITE}Web UI:${NC}"
+    echo -e "    ${CYAN}momos ui${NC}                  ${DIM}serve the UI to your network${NC}"
+    echo -e "    ${CYAN}momos ui 9000${NC}             ${DIM}serve it on another port${NC}"
     echo ""
     echo -e "  ${WHITE}Server:${NC}"
     echo -e "    ${CYAN}momos serve${NC}                ${DIM}run the server in the foreground${NC}"

@@ -413,6 +413,252 @@ fi
 
 # ---------------------------------------------------------------------------
 
+section "launcher — web UI (port, LAN address, static server)"
+
+# Ports below 1024 are privileged on Linux, and Termux is an unprivileged app,
+# so the valid range starts at 1024.
+port_case() {
+    local port="$1" tmp
+    tmp=$(mktemp -d)
+    {
+        harness_preamble
+        extract_function "$MOMOS_SH" is_number
+        extract_function "$MOMOS_SH" valid_port
+        echo "if valid_port '$port'; then echo VALID; else echo INVALID; fi"
+    } > "$tmp/run.sh"
+    OUT=$(bash "$tmp/run.sh" 2>&1)
+    rm -rf "$tmp"
+}
+
+for port in 1024 8080 65535; do
+    port_case "$port"
+    if [ "$OUT" = "VALID" ]; then
+        pass "port $port accepted"
+    else
+        fail "port $port should be accepted, got: $OUT"
+    fi
+done
+
+for port in 80 1023 0 65536 abc '' 80a; do
+    port_case "$port"
+    if [ "$OUT" = "INVALID" ]; then
+        pass "port '${port}' rejected"
+    else
+        fail "port '${port}' should be rejected, got: $OUT"
+    fi
+done
+
+# ---------------------------------------------------------------------------
+
+ipv4_case() {
+    local ip="$1" tmp
+    tmp=$(mktemp -d)
+    {
+        extract_function "$MOMOS_SH" is_ipv4
+        echo "if is_ipv4 '$ip'; then echo YES; else echo NO; fi"
+    } > "$tmp/run.sh"
+    OUT=$(bash "$tmp/run.sh" 2>&1)
+    rm -rf "$tmp"
+}
+
+for ip in 192.168.1.42 127.0.0.1 10.0.0.1 255.255.255.255; do
+    ipv4_case "$ip"
+    if [ "$OUT" = "YES" ]; then
+        pass "$ip recognised as IPv4"
+    else
+        fail "$ip should be recognised, got: $OUT"
+    fi
+done
+
+for ip in 256.1.1.1 1.2.3 1.2.3.4.5 '' abc 192.168.1.; do
+    ipv4_case "$ip"
+    if [ "$OUT" = "NO" ]; then
+        pass "'${ip}' rejected as IPv4"
+    else
+        fail "'${ip}' should be rejected, got: $OUT"
+    fi
+done
+
+# ---------------------------------------------------------------------------
+
+# A stock Termux has neither net-tools nor iproute2 for certain; which tools
+# exist depends on what else pulled them in. Each mode reproduces one mix.
+lan_ip_case() {
+    local mode="$1" tmp
+    tmp=$(mktemp -d)
+
+    case "$mode" in
+        # `ip route get` names the source address directly.
+        ip-route)
+            cat > "$tmp/ip" <<'STUB'
+#!/bin/bash
+echo "1.1.1.1 via 192.168.1.1 dev wlan0 src 192.168.1.42 uid 0"
+STUB
+            ;;
+        # No route line, but the interface listing carries it. Loopback comes
+        # first and must not win.
+        ip-addr)
+            cat > "$tmp/ip" <<'STUB'
+#!/bin/bash
+if [ "$1" = "-4" ] && [ "$2" = "addr" ]; then
+    echo "1: lo: <LOOPBACK,UP> mtu 65536"
+    echo "    inet 127.0.0.1/8 scope host lo"
+    echo "3: wlan0: <BROADCAST,MULTICAST,UP> mtu 1500"
+    echo "    inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0"
+fi
+STUB
+            ;;
+        # No iproute2, but net-tools' ifconfig answers.
+        ifconfig)
+            cat > "$tmp/ip" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+            cat > "$tmp/ifconfig" <<'STUB'
+#!/bin/bash
+echo "lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536"
+echo "        inet 127.0.0.1  netmask 255.0.0.0"
+echo "wlan0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500"
+echo "        inet 192.168.1.42  netmask 255.255.255.0  broadcast 192.168.1.255"
+STUB
+            ;;
+        # Android's toybox ifconfig spells it inet addr:.
+        ifconfig-android)
+            cat > "$tmp/ip" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+            cat > "$tmp/ifconfig" <<'STUB'
+#!/bin/bash
+echo "wlan0     Link encap:Ethernet"
+echo "          inet addr:192.168.1.42  Bcast:192.168.1.255  Mask:255.255.255.0"
+STUB
+            ;;
+        # Nothing usable installed: must give up rather than invent an address.
+        none)
+            cat > "$tmp/ip" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+            cat > "$tmp/ifconfig" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+            ;;
+    esac
+    chmod +x "$tmp"/*
+
+    {
+        extract_function "$MOMOS_SH" is_ipv4
+        extract_function "$MOMOS_SH" lan_ip
+        # Report the address and the status separately: `|| true` would mask
+        # the exit code the "gives up" case exists to check.
+        echo 'addr=$(lan_ip); status=$?'
+        echo 'echo "IP:$addr"'
+        echo 'echo "STATUS:$status"'
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    rm -rf "$tmp"
+}
+
+# Helper so each case asserts on the address without repeating the marker.
+lan_ip_should_be() {
+    local want="$1" label="$2"
+    if grep -qx "IP:$want" <<< "$OUT" && grep -qx "STATUS:0" <<< "$OUT"; then
+        pass "$label"
+    else
+        fail "$label — expected '$want', got: $(tr '\n' ' ' <<< "$OUT")"
+    fi
+}
+
+lan_ip_case ip-route
+lan_ip_should_be "192.168.1.42" "ip route get yields the LAN address"
+
+lan_ip_case ip-addr
+lan_ip_should_be "192.168.1.42" "ip addr show yields the LAN address, skipping loopback"
+
+lan_ip_case ifconfig
+lan_ip_should_be "192.168.1.42" "ifconfig yields the LAN address, skipping loopback"
+
+lan_ip_case ifconfig-android
+lan_ip_should_be "192.168.1.42" "Android-style 'inet addr:' ifconfig is parsed"
+
+# A wrong URL is worse than no URL — the user would type it on a laptop and
+# get nothing, with no idea why.
+lan_ip_case none
+if grep -qx "IP:" <<< "$OUT" && grep -qx "STATUS:1" <<< "$OUT"; then
+    pass "no address invented when no tool reports one, and it reports failure"
+else
+    fail "should give up quietly with a non-zero status, got: $(tr '\n' ' ' <<< "$OUT")"
+fi
+
+# ---------------------------------------------------------------------------
+
+# Termux ships no web server. darkhttpd is ~1MB and serves static files, which
+# is all the placeholder page needs; python is ~40MB that belongs to models.
+httpd_case() {
+    local mode="$1" tmp
+    tmp=$(mktemp -d)
+
+    case "$mode" in
+        both)
+            touch "$tmp/darkhttpd" "$tmp/python3"
+            ;;
+        darkhttpd-only)
+            touch "$tmp/darkhttpd"
+            ;;
+        python-only)
+            touch "$tmp/python3"
+            ;;
+        none) ;;
+    esac
+    chmod +x "$tmp"/* 2>/dev/null || true
+
+    {
+        extract_function "$MOMOS_SH" httpd_kind
+        # PATH is narrowed so the host's own python3/darkhttpd cannot leak in
+        # and mask the "nothing installed" case.
+        echo "PATH='$tmp'"
+        echo 'echo "KIND=$(httpd_kind)"'
+    } > "$tmp/run.sh"
+
+    OUT=$(bash "$tmp/run.sh" 2>&1)
+    rm -rf "$tmp"
+}
+
+httpd_case both
+if [ "$OUT" = "KIND=darkhttpd" ]; then
+    pass "darkhttpd preferred when several servers are present"
+else
+    fail "darkhttpd should win, got: '$OUT'"
+fi
+
+httpd_case darkhttpd-only
+if [ "$OUT" = "KIND=darkhttpd" ]; then
+    pass "darkhttpd detected on its own"
+else
+    fail "expected darkhttpd, got: '$OUT'"
+fi
+
+httpd_case python-only
+if [ "$OUT" = "KIND=python3" ]; then
+    pass "python3 used when darkhttpd is absent"
+else
+    fail "expected python3, got: '$OUT'"
+fi
+
+httpd_case none
+if [ "$OUT" = "KIND=" ]; then
+    pass "no server reported when none is installed"
+else
+    fail "expected empty KIND, got: '$OUT'"
+fi
+
+# ---------------------------------------------------------------------------
+
 section "repo layout"
 
 if [ -f "$LEGACY_SH" ] && [ -f "$REPO_ROOT/scripts/legacy/proot/setup.sh" ]; then
@@ -448,6 +694,23 @@ if grep -qE "proot-distro (install|add)" "$SETUP_SH"; then
     fail "scripts/setup.sh still installs proot-distro itself"
 else
     pass "scripts/setup.sh never installs proot-distro"
+fi
+
+# The UI page is fetched to the device at install time, so it has to be a real
+# file in the repo rather than something generated into the launcher.
+UI_HTML="$REPO_ROOT/scripts/ui/index.html"
+if [ -f "$UI_HTML" ]; then
+    pass "scripts/ui/index.html exists"
+else
+    fail "scripts/ui/index.html is missing — 'momos ui' would have nothing to serve"
+fi
+
+# Both the installer and the launcher's self-heal path must point at the same
+# path, or a fresh run and a `momos update` would disagree about where it lives.
+if grep -q "scripts/ui/index.html" "$MOMOS_SH"; then
+    pass "momos.sh knows where to fetch the UI page from"
+else
+    fail "momos.sh never references scripts/ui/index.html"
 fi
 
 # ---------------------------------------------------------------------------
