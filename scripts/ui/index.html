@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="robots" content="noindex">
-<!-- momos-ui:2 -->
+<!-- momos-ui:3 -->
 <title>MOMOS — web ui</title>
 <!--
   The chat page for `momos ui`.
@@ -18,6 +18,13 @@
   this browser actually dialled. That is the whole trick: open the page on the
   phone and it dials loopback, open it from a laptop and it dials the phone's
   address on the Wi-Fi, and neither needs configuring.
+
+  Saved chats live in this browser's localStorage, not on the phone. The page is
+  served by a static file server, so there is nowhere for it to write: the phone
+  has no endpoint to post a chat to, and giving it one would mean another
+  process competing with the model for the phone's memory. The cost is that the
+  laptop's chats and the phone's chats are separate, and clearing site data
+  clears them — which is what the notice on the page says.
 
   The `momos-ui:` marker above is a version stamp. The launcher and installer
   look for it to decide whether the copy on the device is current, so it must
@@ -39,6 +46,13 @@
     --step-0: 0.8125rem;
     --step-1: 0.9375rem;
     --step-2: clamp(1.75rem, 9vw, 2.75rem);
+
+    /* The chat-list column. The breakpoint where it appears is written out in
+       the media queries below instead, because a condition cannot read a
+       custom property. It is 55rem and not less: the two columns, the gap
+       between them and the page's own padding come to about that much, and
+       below it the conversation would be squeezed under its measure. */
+    --list-col: 16rem;
   }
 
   *, *::before, *::after { box-sizing: border-box; }
@@ -63,6 +77,25 @@
   .shell {
     width: 100%;
     max-width: 62ch;
+  }
+
+  /* Two columns once there is room for both without squeezing the conversation
+     below the measure it was written for. The list is pinned so a long reply
+     scrolls under it rather than carrying it off the screen. */
+  @media (min-width: 55rem) {
+    .shell {
+      display: grid;
+      grid-template-columns: var(--list-col) minmax(0, 62ch);
+      gap: 1.5rem;
+      max-width: calc(var(--list-col) + 1.5rem + 62ch);
+      align-items: start;
+    }
+
+    .chats {
+      position: sticky;
+      top: clamp(1.5rem, 6vw, 4rem);
+      margin-bottom: 0;
+    }
   }
 
   /* The project's banner, rebuilt as a real box. Terminals have no rounded
@@ -92,6 +125,47 @@
     color: var(--muted);
   }
 
+  /* Which model answers is a property of the conversation, not of the page, so
+     the picker sits with the banner rather than in a settings screen. */
+  .picker {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .picker select {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: var(--step-0);
+    color: var(--text);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 0.35rem 0.5rem;
+  }
+
+  .picker select:focus { outline: none; border-color: var(--phosphor); }
+
+  .picker select:disabled { color: var(--muted); }
+
+  .icon {
+    flex: none;
+    font: inherit;
+    font-size: var(--step-0);
+    color: var(--phosphor);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 0 0.6rem;
+    cursor: pointer;
+  }
+
+  .icon:hover:not(:disabled) { border-color: var(--phosphor); }
+
+  .icon:disabled { color: var(--muted); cursor: default; }
+
   .notice {
     margin: 0 0 2rem;
     padding-left: 0.9rem;
@@ -99,6 +173,9 @@
     font-size: var(--step-0);
     color: var(--muted);
     max-width: 54ch;
+    /* Each warning is its own line; they are stacked rather than replaced so a
+       second reason the page is degraded cannot hide the first. */
+    white-space: pre-line;
   }
 
   .notice strong {
@@ -107,6 +184,141 @@
   }
 
   .notice[hidden] { display: none; }
+
+  /* The chat list. On a phone it is a panel above the conversation, closed
+     until asked for — a drawer would need a backdrop, a z-index and scroll
+     locking, which is a lot of machinery for the one page that must not break. */
+  .chats {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-size: var(--step-0);
+    margin-bottom: 1.5rem;
+  }
+
+  .chats-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.45rem 0.5rem 0.45rem 0.6rem;
+  }
+
+  .chats.open .chats-head { border-bottom: 1px solid var(--line); }
+
+  .chats-label {
+    display: none;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+  }
+
+  .chats-toggle {
+    font: inherit;
+    font-size: var(--step-0);
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    letter-spacing: 0.12em;
+  }
+
+  .chats-toggle:hover { color: var(--text); }
+
+  .chats-new {
+    font: inherit;
+    font-size: var(--step-0);
+    color: var(--phosphor);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .chats-new:hover:not(:disabled) { border-color: var(--phosphor); }
+
+  .chats-new:disabled { color: var(--muted); cursor: default; }
+
+  #chats-body { display: none; }
+
+  .chats.open #chats-body { display: block; }
+
+  @media (min-width: 55rem) {
+    .chats-toggle { display: none; }
+    .chats-label { display: inline; }
+    .chats-head { border-bottom: 1px solid var(--line); }
+    /* The panel is always open where there is a column to hold it, so the
+       `.open` class can be set freely without one layout clobbering the other. */
+    #chats-body { display: block; }
+  }
+
+  .chat-list {
+    list-style: none;
+    margin: 0;
+    padding: 0.35rem 0;
+    /* A sticky column must not grow taller than the viewport, or the last rows
+       and the composer both become unreachable. */
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+
+  .chat-row { display: flex; align-items: stretch; }
+
+  .chat-row.active { box-shadow: inset 2px 0 0 var(--phosphor); }
+
+  .chat-open {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: var(--step-0);
+    text-align: left;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    padding: 0.45rem 0.6rem;
+    cursor: pointer;
+    /* A title is one line by construction, so it can be cut with an ellipsis
+       rather than wrapping and making the rows uneven heights. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-open:hover:not(:disabled) { color: var(--text); }
+
+  .chat-row.active .chat-open { color: var(--phosphor); }
+
+  .chat-open:disabled { cursor: default; }
+
+  .chat-del {
+    flex: none;
+    font: inherit;
+    font-size: var(--step-0);
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    padding: 0 0.6rem;
+    cursor: pointer;
+    /* Hidden until the row is pointed at, so the list reads as titles. A phone
+       has no hover, so there it is always visible — an affordance you cannot
+       reach is worse than a busy row. */
+    opacity: 0;
+  }
+
+  .chat-row:hover .chat-del, .chat-del:focus-visible { opacity: 1; }
+
+  .chat-del:hover:not(:disabled) { color: var(--amber); }
+
+  @media (hover: none) {
+    .chat-del { opacity: 1; }
+  }
+
+  .chats-empty {
+    margin: 0;
+    padding: 0.4rem 0.6rem 0.6rem;
+    color: var(--muted);
+  }
+
+  .chats-empty[hidden] { display: none; }
 
   /* The conversation. */
   .log {
@@ -146,7 +358,9 @@
   /* DeepSeek R1 and friends stream their working-out in a separate field. It
      is folded away and dimmed because it is reasoning, not the reply — but it
      has to be shown, or those models look like a long silence followed by an
-     answer that came from nowhere. */
+     answer that came from nowhere. It is not saved with a chat: the folds are
+     read once, and keeping them would multiply the storage several times over
+     for something already scrolled past. */
   .think {
     margin: 0 0 0.6rem;
     padding-left: 0.9rem;
@@ -275,27 +489,55 @@
 </head>
 <body>
   <main class="shell">
-    <header class="frame">
-      <h1 class="wordmark">MOMOS</h1>
-      <p class="subtitle">web ui</p>
-    </header>
+    <!-- First in the document on purpose. On a phone it is the panel above the
+         conversation, and the toggle that opens it sits at the top of the page
+         rather than below the thing it reveals. -->
+    <nav class="chats" id="chats" aria-label="Saved chats">
+      <div class="chats-head">
+        <button type="button" class="chats-toggle" id="chats-toggle"
+                aria-expanded="false" aria-controls="chats-body">chats ▸</button>
+        <span class="chats-label" id="chats-label">chats</span>
+        <button type="button" class="chats-new" id="new-chat">+ new</button>
+      </div>
+      <div id="chats-body">
+        <ul class="chat-list" id="chat-list"></ul>
+        <p class="chats-empty" id="chats-empty">no saved chats</p>
+      </div>
+    </nav>
 
-    <p class="notice" id="banner" hidden></p>
+    <!-- One grid cell holding everything but the list. Without it the frame,
+         the log, the composer and the status line would each be a cell of
+         their own. It carries no styles of its own. -->
+    <div class="column">
+      <header class="frame">
+        <h1 class="wordmark">MOMOS</h1>
+        <p class="subtitle">web ui</p>
+        <div class="picker">
+          <label class="sr-only" for="model">Model</label>
+          <select id="model"></select>
+          <button type="button" class="icon" id="reload-models"
+                  title="Reload the model list"
+                  aria-label="Reload the model list">↻</button>
+        </div>
+      </header>
 
-    <!-- aria-live is off on the log on purpose. A polite live region over a
-         token-by-token stream reads every fragment aloud, which is unusable.
-         Arrivals and state changes are announced through #status instead. -->
-    <div class="log" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
+      <p class="notice" id="banner" hidden></p>
 
-    <form class="composer" id="composer" autocomplete="off">
-      <label class="sr-only" for="prompt">Message</label>
-      <textarea id="prompt" rows="1" spellcheck="false"
-                placeholder="ask something"></textarea>
-      <button type="submit" id="send">Send</button>
-      <button type="button" id="stop" hidden>Stop</button>
-    </form>
+      <!-- aria-live is off on the log on purpose. A polite live region over a
+           token-by-token stream reads every fragment aloud, which is unusable.
+           Arrivals and state changes are announced through #status instead. -->
+      <div class="log" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
 
-    <p class="status" id="status" role="status" aria-live="polite"></p>
+      <form class="composer" id="composer" autocomplete="off">
+        <label class="sr-only" for="prompt">Message</label>
+        <textarea id="prompt" rows="1" spellcheck="false"
+                  placeholder="ask something"></textarea>
+        <button type="submit" id="send">Send</button>
+        <button type="button" id="stop" hidden>Stop</button>
+      </form>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </div>
   </main>
 
   <script>
@@ -309,13 +551,173 @@
       var stopBtn = document.getElementById('stop');
       var statusEl = document.getElementById('status');
       var banner = document.getElementById('banner');
+      var modelSel = document.getElementById('model');
+      var reloadBtn = document.getElementById('reload-models');
+      var chatsEl = document.getElementById('chats');
+      var chatList = document.getElementById('chat-list');
+      var chatEmpty = document.getElementById('chats-empty');
+      var chatsLabel = document.getElementById('chats-label');
+      var chatsToggle = document.getElementById('chats-toggle');
+      var newChatBtn = document.getElementById('new-chat');
 
       var PORT = 11434;   // replaced by whatever runtime.json says
       var BASE = null;
-      var MODEL = '';
-      var history = [];   // completed turns only: [{role, content}]
+      var DEFAULT_MODEL = '';  // what runtime.json last recorded
+      var draftModel = '';     // the model a chat not yet started would use
+      var models = [];         // installed names from /api/tags; [] if unknown
+      // Whether /api/tags actually answered. An empty list means "nothing
+      // installed" only if it did — otherwise every model would be labelled
+      // missing, which is a claim the page has no grounds for.
+      var modelsKnown = false;
+      var storage = null;      // localStorage, or null when it cannot be used
+      var generating = false;
       var controller = null;
-      var current = null; // the reply being streamed
+      var current = null;      // the reply being streamed
+
+      // --- store:begin ---
+      // Everything between these markers is free of the DOM, window and fetch:
+      // tests/test-ui-store.sh extracts this block and runs it under node
+      // against a stub storage. Keep it that way, or that test stops meaning
+      // anything.
+
+      var STORE_KEY = 'momos.sessions.v1';
+      var MAX_SESSIONS = 50;
+      var TITLE_MAX = 40;
+
+      function newId() {
+        return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      }
+
+      // A conversation's name is the first thing you said in it. Only the first
+      // line survives, because a pasted stack trace would otherwise become a
+      // paragraph in a 16rem column.
+      function titleFor(text) {
+        var line = String(text == null ? '' : text).split('\n')[0].trim();
+        if (!line) return 'untitled';
+        if (line.length <= TITLE_MAX) return line;
+        return line.slice(0, TITLE_MAX - 1).trim() + '…';
+      }
+
+      function isMessage(m) {
+        return !!m && typeof m === 'object' &&
+          (m.role === 'user' || m.role === 'assistant') &&
+          typeof m.content === 'string';
+      }
+
+      // Newest first, so "the most recent chat" is the head of the list and the
+      // storage cap is a slice.
+      function byRecency(sessions) {
+        return sessions.slice().sort(function (a, b) {
+          return (b.updated || 0) - (a.updated || 0);
+        });
+      }
+
+      // Stored JSON is untrusted: it is whatever some earlier version of this
+      // page, or a hand-edit, left behind. Anything malformed is dropped rather
+      // than thrown, because a page that will not start cannot be repaired from
+      // inside the browser.
+      function parseStore(raw) {
+        var empty = { current: null, sessions: [] };
+        if (typeof raw !== 'string' || !raw) return empty;
+
+        var data;
+        try { data = JSON.parse(raw); } catch (e) { return empty; }
+        if (!data || typeof data !== 'object' || !Array.isArray(data.sessions)) return empty;
+
+        var kept = [];
+        for (var i = 0; i < data.sessions.length; i++) {
+          var s = data.sessions[i];
+          if (!s || typeof s !== 'object') continue;
+          if (typeof s.id !== 'string' || !s.id) continue;
+
+          var list = Array.isArray(s.messages) ? s.messages : [];
+          var messages = [];
+          for (var j = 0; j < list.length; j++) {
+            // Rebuilt field by field rather than copied: whatever else was in
+            // there is not ours to carry forward, and the request body is built
+            // from these objects.
+            if (isMessage(list[j])) {
+              messages.push({ role: list[j].role, content: list[j].content });
+            }
+          }
+          // A chat is created on its first message, so an empty one was never
+          // meant to be stored and is not worth a row.
+          if (!messages.length) continue;
+
+          kept.push({
+            id: s.id,
+            title: (typeof s.title === 'string' && s.title) || titleFor(messages[0].content),
+            model: typeof s.model === 'string' ? s.model : '',
+            updated: typeof s.updated === 'number' && isFinite(s.updated) ? s.updated : 0,
+            messages: messages
+          });
+        }
+
+        kept = byRecency(kept).slice(0, MAX_SESSIONS);
+
+        var current = null;
+        for (var k = 0; k < kept.length; k++) {
+          if (kept[k].id === data.current) { current = kept[k].id; break; }
+        }
+
+        return { current: current, sessions: kept };
+      }
+
+      // The exact shape that goes into storage. The list is passed in rather
+      // than read off the store so the quota path below can write a shorter
+      // list of the same shape.
+      function serializeStore(store, sessions) {
+        var current = null;
+        for (var i = 0; i < sessions.length; i++) {
+          if (sessions[i].id === store.current) { current = sessions[i].id; break; }
+        }
+        return JSON.stringify({ current: current, sessions: sessions });
+      }
+
+      // localStorage is small and a phone gets there long before a laptop does.
+      // A write that fails is no reason to lose the page, so the oldest chat is
+      // given up and the write retried — the cheapest thing to lose first.
+      //
+      // Returns the ids that could not be kept, so the page can say so, or an
+      // empty array when everything fitted. The caller keeps its full store in
+      // memory either way; only the saved copy is smaller.
+      function safeSet(storage, store) {
+        var ordered = byRecency(store.sessions || []);
+        var keep = ordered.slice(0, MAX_SESSIONS);
+        var dropped = [];
+        for (var d = MAX_SESSIONS; d < ordered.length; d++) dropped.push(ordered[d].id);
+
+        // Walks down to an empty write, because the failure might not be size
+        // at all — a browser can refuse storage outright — and a loop that can
+        // only end by succeeding would spin.
+        for (var n = keep.length; n >= 0; n--) {
+          try {
+            storage.setItem(STORE_KEY, serializeStore(store, keep.slice(0, n)));
+            return dropped;
+          } catch (e) {
+            if (n > 0) dropped.push(keep[n - 1].id);
+          }
+        }
+
+        try { storage.removeItem(STORE_KEY); } catch (e2) { /* nothing to do */ }
+        return dropped;
+      }
+
+      // Private-mode Safari and a full disk both throw on every setItem, and
+      // retrying a hopeless write on every turn would cost more than the chat is
+      // worth. One probe at startup decides whether to try at all.
+      function storageUsable(storage) {
+        try {
+          storage.setItem(STORE_KEY + '.probe', '1');
+          storage.removeItem(STORE_KEY + '.probe');
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+      // --- store:end ---
+
+      var STORE = { current: null, sessions: [] };
 
       function isLocal(host) {
         return host === 'localhost' || host === '127.0.0.1' ||
@@ -334,9 +736,45 @@
         statusEl.textContent = text;
       }
 
-      function setBusy(busy) {
-        sendBtn.disabled = busy || !MODEL;
-        stopBtn.hidden = !busy;
+      // Warnings stack instead of replacing one another: a page can be without a
+      // model list and without storage at the same time, and the second reason
+      // must not hide the first.
+      var warnings = [];
+
+      function warn(text) {
+        if (warnings.indexOf(text) === -1) warnings.push(text);
+        banner.textContent = warnings.join('\n');
+        banner.hidden = false;
+      }
+
+      function activeSession() {
+        for (var i = 0; i < STORE.sessions.length; i++) {
+          if (STORE.sessions[i].id === STORE.current) return STORE.sessions[i];
+        }
+        return null;
+      }
+
+      function findSession(id) {
+        for (var i = 0; i < STORE.sessions.length; i++) {
+          if (STORE.sessions[i].id === id) return STORE.sessions[i];
+        }
+        return null;
+      }
+
+      // The model a request would go to right now: the open chat's, or the one
+      // picked for a chat that has not been started yet.
+      function currentModel() {
+        var s = activeSession();
+        if (s && s.model) return s.model;
+        return draftModel || DEFAULT_MODEL;
+      }
+
+      function persist() {
+        if (!storage) return;
+        var dropped = safeSet(storage, STORE);
+        if (dropped && dropped.length) {
+          warn('Storage is full, so the oldest chats were not saved.');
+        }
       }
 
       function scrollToEnd() {
@@ -368,6 +806,10 @@
           turn: turn, body: body, answer: answer,
           think: null, caret: null, text: '', failed: false
         };
+      }
+
+      function clearLog() {
+        while (logEl.firstChild) logEl.removeChild(logEl.firstChild);
       }
 
       function showCaret(t) {
@@ -444,8 +886,8 @@
       }
 
       function withHint(msg) {
-        if (MODEL && /not found|no such|try pulling/i.test(msg)) {
-          return msg + '\n\nOn the phone:  momos models pull ' + MODEL;
+        if (currentModel() && /not found|no such|try pulling/i.test(msg)) {
+          return msg + '\n\nOn the phone:  momos models pull ' + currentModel();
         }
         return msg;
       }
@@ -523,13 +965,48 @@
         return pump();
       }
 
+      // Every control that changes which chat is open is locked while a reply is
+      // arriving, because the stream appends to whichever chat is open when the
+      // text lands — switching mid-reply would file the answer under the wrong
+      // conversation. Stop is always there to take the lock off.
+      function setGenerating(busy) {
+        generating = busy;
+        sendBtn.disabled = busy || !currentModel();
+        stopBtn.hidden = !busy;
+        newChatBtn.disabled = busy;
+        modelSel.disabled = busy || !modelSel.options.length;
+        var rows = chatList.getElementsByTagName('button');
+        for (var i = 0; i < rows.length; i++) rows[i].disabled = busy;
+      }
+
       function send(text) {
-        history.push({ role: 'user', content: text });
+        var session = activeSession();
+        if (!session) {
+          // The chat is created here rather than when "+ new" is pressed, so a
+          // chat you never typed in leaves nothing behind.
+          session = { id: newId(), title: '', model: currentModel(),
+                      updated: Date.now(), messages: [] };
+          STORE.sessions.unshift(session);
+          STORE.current = session.id;
+        }
+        if (!session.model) session.model = currentModel();
+
+        session.messages.push({ role: 'user', content: text });
+        session.updated = Date.now();
+        if (session.messages.length === 1) session.title = titleFor(text);
+
         appendText(addTurn('user').answer, text);
+
+        // Saved before the reply is asked for, so a reload in the middle of a
+        // long generation keeps the question. It will look unanswered, because
+        // that is what happened.
+        persist();
+        renderChats();
+        syncModelSelect();
 
         current = addTurn('assistant');
         showCaret(current);
-        setBusy(true);
+        setGenerating(true);
         setStatus('generating');
 
         controller = new AbortController();
@@ -538,8 +1015,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: MODEL,
-            messages: history,
+            model: session.model,
+            messages: session.messages,
             stream: true,
             keep_alive: '5m'
             // num_ctx is deliberately not set. Raising it multiplies the KV
@@ -566,20 +1043,23 @@
             // context and the screen disagreeing.
             hideCaret(current);
             if (current && current.text) {
-              history.push({ role: 'assistant', content: current.text });
+              session.messages.push({ role: 'assistant', content: current.text });
+              session.updated = Date.now();
+              persist();
             }
             current = null;
             controller = null;
-            setBusy(false);
+            setGenerating(false);
+            renderChats();
             if (statusEl.textContent === 'generating') setStatus('done');
             input.focus();
           });
       }
 
       function submit() {
-        if (controller) return;   // one request at a time
+        if (generating) return;   // one request at a time
         var text = input.value.trim();
-        if (!text || !MODEL) return;
+        if (!text || !currentModel()) return;
         input.value = '';
         autosize();
         send(text);
@@ -589,6 +1069,260 @@
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px';
       }
+
+      // ---- the chat list ----
+
+      function setChatsOpen(open) {
+        chatsEl.className = open ? 'chats open' : 'chats';
+        chatsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        updateChatsLabel();
+      }
+
+      function updateChatsLabel() {
+        var n = STORE.sessions.length;
+        var count = n ? ' (' + n + ')' : '';
+        chatsLabel.textContent = 'chats' + count;
+        chatsToggle.textContent = 'chats' + count +
+          (chatsEl.className.indexOf('open') === -1 ? ' ▸' : ' ▾');
+      }
+
+      function chatRow(session) {
+        var li = document.createElement('li');
+        li.className = session.id === STORE.current ? 'chat-row active' : 'chat-row';
+
+        var title = session.title || 'untitled';
+
+        var open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'chat-open';
+        open.textContent = title;
+        // Which chat is open is carried by aria-current rather than by the
+        // colour alone, which is the part of it a screen reader can hear.
+        if (session.id === STORE.current) open.setAttribute('aria-current', 'true');
+        open.title = title + '\n' + (session.model || 'no model') +
+          ' · ' + session.messages.length + ' messages';
+        open.addEventListener('click', function () { openSession(session.id); });
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'chat-del';
+        del.textContent = '×';
+        del.setAttribute('aria-label', 'Delete chat: ' + title);
+        del.addEventListener('click', function () { deleteSession(session.id); });
+
+        li.appendChild(open);
+        li.appendChild(del);
+        return li;
+      }
+
+      function renderChats() {
+        clearNode(chatList);
+        // Sorted here rather than kept sorted: the array is only in recency
+        // order until a chat that is already in it is spoken to again, and
+        // re-ordering the array on every turn would move rows under the cursor.
+        var ordered = byRecency(STORE.sessions);
+        for (var i = 0; i < ordered.length; i++) {
+          chatList.appendChild(chatRow(ordered[i]));
+        }
+        chatEmpty.hidden = STORE.sessions.length > 0;
+        updateChatsLabel();
+        setGenerating(generating);   // freshly built rows arrive enabled
+      }
+
+      function clearNode(node) {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      }
+
+      // A restored chat shows the question and the reply. It does not show the
+      // reasoning folds or the caret, because neither was saved.
+      function replay(session) {
+        clearLog();
+        for (var i = 0; i < session.messages.length; i++) {
+          var m = session.messages[i];
+          var t = addTurn(m.role === 'user' ? 'user' : 'assistant');
+          appendText(t.answer, m.content);
+        }
+        scrollToEnd();
+      }
+
+      function openSession(id) {
+        var session = findSession(id);
+        if (!session || generating) return;
+
+        STORE.current = id;
+        replay(session);
+        persist();
+        renderChats();
+        syncModelSelect();
+        setChatsOpen(false);   // a no-op where the column is always shown
+        setStatus('opened ' + (session.title || 'untitled'));
+        input.focus();
+      }
+
+      function newChat() {
+        if (generating) return;
+
+        var prev = activeSession();
+        STORE.current = null;
+        clearLog();
+        // A new chat inherits the model you were just using: the usual reason to
+        // start one is a new subject, not a different model.
+        if (prev && prev.model) draftModel = prev.model;
+
+        persist();
+        renderChats();
+        syncModelSelect();
+        setChatsOpen(false);
+        setStatus('new chat');
+        input.focus();
+      }
+
+      function deleteSession(id) {
+        var session = findSession(id);
+        // The one irreversible thing on this page, so it asks. confirm() is
+        // drab and blocking, and that is the point.
+        if (!session || generating) return;
+        if (!window.confirm('Delete "' + (session.title || 'untitled') + '"?\n\n' +
+                            'This cannot be undone.')) {
+          return;
+        }
+
+        for (var i = 0; i < STORE.sessions.length; i++) {
+          if (STORE.sessions[i].id === id) { STORE.sessions.splice(i, 1); break; }
+        }
+
+        if (STORE.current === id) {
+          // Fall through to the most recent one left, or to an empty draft.
+          var next = byRecency(STORE.sessions)[0];
+          STORE.current = next ? next.id : null;
+          if (next) replay(next); else clearLog();
+        }
+
+        persist();
+        renderChats();
+        syncModelSelect();
+        setStatus('deleted');
+        input.focus();
+      }
+
+      // ---- the model picker ----
+
+      // Installed models, plus whatever the open chat is set to. A chat whose
+      // model was deleted on the phone must still be able to name it — and keep
+      // it — rather than silently reassigning the conversation.
+      function modelNames() {
+        // The missing one goes last rather than being sorted in among the real
+        // ones, where "not installed" would be a surprise in the middle of the
+        // list instead of the answer at the end of it.
+        var names = models.slice().sort();
+        var cur = currentModel();
+        if (cur && names.indexOf(cur) === -1) names.push(cur);
+        return names;
+      }
+
+      function syncModelSelect() {
+        var names = modelNames();
+        var cur = currentModel();
+
+        // With nothing to offer, the control still has to say something, or it
+        // renders as an empty box with no explanation of why it is empty.
+        var values = names.length ? names : [''];
+
+        var changed = values.length !== modelSel.options.length;
+        if (!changed) {
+          for (var i = 0; i < values.length; i++) {
+            if (modelSel.options[i].value !== values[i]) { changed = true; break; }
+          }
+        }
+
+        if (changed) {
+          clearNode(modelSel);
+          for (var k = 0; k < values.length; k++) {
+            var opt = document.createElement('option');
+            var name = values[k];
+            opt.value = name;
+            if (!name) opt.textContent = 'no model installed';
+            else opt.textContent = modelsKnown && models.indexOf(name) === -1
+              ? name + ' (not installed)'
+              : name;
+            modelSel.appendChild(opt);
+          }
+        }
+
+        if (cur) modelSel.value = cur;
+        modelSel.disabled = generating || !cur;
+      }
+
+      function noListHint() {
+        return 'Could not list the models installed on the phone. Chat still ' +
+               'works; reload the list with ↻ once the server is reachable.';
+      }
+
+      function fetchModels() {
+        reloadBtn.disabled = true;
+        return fetch(BASE + '/api/tags')
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (data) {
+            var found = [];
+            if (data && Array.isArray(data.models)) {
+              for (var i = 0; i < data.models.length; i++) {
+                var m = data.models[i];
+                if (m && typeof m.name === 'string' && m.name) found.push(m.name);
+              }
+              modelsKnown = true;
+            } else {
+              modelsKnown = false;
+            }
+            models = found;
+            if (!modelsKnown) warn(noListHint());
+          })
+          .catch(function () {
+            modelsKnown = false;
+            models = [];
+            warn(noListHint());
+          })
+          .then(function () {
+            reloadBtn.disabled = false;
+            syncModelSelect();
+          });
+      }
+
+      // Switching mid-conversation changes who answers from the next turn on.
+      // The turns already on screen stay as they were, and there is no attempt
+      // to unload the old model from memory: a second browser might be in the
+      // middle of generating with it.
+      modelSel.addEventListener('change', function () {
+        var picked = modelSel.value;
+        if (!picked) return;
+
+        var session = activeSession();
+        if (session) {
+          session.model = picked;
+          session.updated = Date.now();
+          persist();
+          renderChats();
+        } else {
+          draftModel = picked;
+        }
+        setStatus(picked);
+        input.focus();
+      });
+
+      reloadBtn.addEventListener('click', function () { fetchModels(); });
+
+      chatsToggle.addEventListener('click', function () {
+        setChatsOpen(chatsEl.className.indexOf('open') === -1);
+      });
+
+      newChatBtn.addEventListener('click', newChat);
+
+      // On a phone the panel covers the conversation, so escape closes it.
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && chatsEl.className.indexOf('open') !== -1) {
+          setChatsOpen(false);
+          chatsToggle.focus();
+        }
+      });
 
       form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -611,32 +1345,59 @@
         if (controller) controller.abort();
       });
 
+      function openStorage() {
+        try {
+          var s = window.localStorage;
+          // Some browsers throw on the property access itself, and private modes
+          // answer it with an object that refuses every write.
+          return s && storageUsable(s) ? s : null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function readRaw(s) {
+        try { return s.getItem(STORE_KEY); } catch (e) { return null; }
+      }
+
       function init(cfg) {
         if (cfg && typeof cfg.ollama_port === 'number') PORT = cfg.ollama_port;
         BASE = baseUrl(location.hostname, PORT);
 
-        MODEL = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+        DEFAULT_MODEL = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+        draftModel = DEFAULT_MODEL;
 
-        if (!MODEL) {
-          // The launcher writes runtime.json from the last-used model. Until
-          // one has been chosen there is nothing to talk to, and saying so is
-          // better than a request that fails with a server error.
-          showBanner('No model chosen yet. In Termux run '
-            + '`momos chat <model>` once, then reload this page.');
-          sendBtn.disabled = true;
-          setStatus('no model');
-          return;
+        storage = openStorage();
+        if (storage) {
+          STORE = parseStore(readRaw(storage));
+        } else {
+          warn('This browser is not saving chats — private mode, or site data is ' +
+               'blocked. The page still works; nothing you type here will be here ' +
+               'after a reload.');
         }
 
-        // Shown before the first turn so it is clear which model is answering.
-        setStatus(MODEL);
+        // Reopen where you left off, so a reload is not a reset.
+        var newest = byRecency(STORE.sessions)[0];
+        if (!activeSession() && newest) STORE.current = newest.id;
+        var open = activeSession();
+        if (open) replay(open);
+
+        renderChats();
+        syncModelSelect();
+
+        if (!currentModel()) {
+          // The launcher writes runtime.json from the last-used model. Until one
+          // has been chosen there is nothing to talk to, and saying so is better
+          // than a request that fails with a server error. The saved chats are
+          // still readable, which is why this no longer returns early.
+          warn('No model chosen yet. In Termux run `momos chat <model>` once, ' +
+               'then reload this page.');
+          setStatus('no model');
+        }
+
+        fetchModels();
         autosize();
         input.focus();
-      }
-
-      function showBanner(text) {
-        banner.textContent = text;
-        banner.hidden = false;
       }
 
       // runtime.json is written beside this page by `momos ui`, so it is a

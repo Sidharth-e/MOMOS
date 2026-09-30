@@ -371,7 +371,7 @@ UI_PID_FILE="$LOG_DIR/ui.pid"
 # existing install picks up a new page without a full reinstall. The number is
 # duplicated in the page on purpose: this heredoc is quoted, so interpolating it
 # here would expand every $VAR in the launcher at install time.
-UI_VERSION="2"
+UI_VERSION="3"
 OLLAMA_URL="http://127.0.0.1:11434"
 
 MODEL=""
@@ -608,9 +608,15 @@ ensure_ui_files() {
     exit 1
 }
 
-# The page has no model picker, so it reads the last-used model from here. The
-# file sits beside index.html because darkhttpd serves that directory, and is
-# rewritten on every `momos ui` so it cannot drift from the CLI's own state.
+# The page's model picker offers what the phone has installed, but it has to
+# start somewhere: this is the model a new chat opens with, and the only one on
+# offer if the page cannot reach Ollama to ask. The file sits beside index.html
+# because darkhttpd serves that directory, and is rewritten on every `momos ui`
+# so it cannot drift from the CLI's own state.
+#
+# Nothing the page does writes back here. It is served by a static file server,
+# so a choice made in the browser stays in the browser — which is also why saved
+# chats are per-browser rather than per-phone.
 #
 # That state is normally one line written by `momos chat`, but a hand-edited file
 # could hold anything. Taking the first line and dropping quotes and backslashes

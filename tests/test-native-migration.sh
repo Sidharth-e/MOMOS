@@ -822,7 +822,7 @@ STUB
         echo 'UI_DIR=$LOG_DIR/ui'
         echo 'UI_LOG=$LOG_DIR/ui.log'
         echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
-        echo 'UI_VERSION="2"'
+        echo 'UI_VERSION="3"'
         echo 'OLLAMA_URL="http://127.0.0.1:11434"'
         echo 'MODEL=""'
         echo "server_up() { [ -f '$tmp/up' ]; }"
@@ -1091,7 +1091,7 @@ STUB
         echo 'set -euo pipefail'
         echo "LOG_DIR='$tmp/home/.momos'"
         echo 'UI_DIR=$LOG_DIR/ui'
-        echo 'UI_VERSION="2"'
+        echo 'UI_VERSION="3"'
         extract_function "$MOMOS_SH" ensure_ui_files
         echo 'ensure_ui_files'
         echo 'echo "REACHED_END"'
@@ -1108,7 +1108,7 @@ STUB
 
 old_page='<!-- momos-ui:1 -->
 the older page'
-new_page='<!-- momos-ui:2 -->
+new_page='<!-- momos-ui:3 -->
 the newer page'
 
 ui_fetch_case "$new_page" fail ''
@@ -1161,12 +1161,12 @@ fi
 # The fast path wants this exact version, not any marker: a page stamped for a
 # future launcher would otherwise pin the device on a page the CLI has moved
 # past. The trailing `-->` in the pattern is what makes the match exact.
-ui_fetch_case '<!-- momos-ui:20 -->
+ui_fetch_case '<!-- momos-ui:30 -->
 ahead of the CLI' fail ''
 if [ "$RUN_STATUS" -eq 0 ] && [ -n "$FETCHED" ]; then
     pass "the marker match is exact, not a prefix"
 else
-    fail "momos-ui:20 must not satisfy momos-ui:2 (curl='$FETCHED')"
+    fail "momos-ui:30 must not satisfy momos-ui:3 (curl='$FETCHED')"
     show "$OUT"
 fi
 
@@ -1280,7 +1280,7 @@ STUB
         echo 'UI_DIR=$LOG_DIR/ui'
         echo 'UI_LOG=$LOG_DIR/ui.log'
         echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
-        echo 'UI_VERSION="2"'
+        echo 'UI_VERSION="3"'
         echo 'OLLAMA_URL="http://127.0.0.1:11434"'
         echo 'MODEL=""'
         echo 'if [ -f "$STATE_FILE" ]; then'
@@ -1378,7 +1378,7 @@ STUB
         echo 'UI_DIR=$LOG_DIR/ui'
         echo 'UI_LOG=$LOG_DIR/ui.log'
         echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
-        echo 'UI_VERSION="2"'
+        echo 'UI_VERSION="3"'
         echo 'OLLAMA_URL="http://127.0.0.1:11434"'
         echo 'MODEL=""'
         extract_function "$MOMOS_SH" is_number
@@ -1611,7 +1611,7 @@ STUB
         echo 'UI_DIR=$LOG_DIR/ui'
         echo 'UI_LOG=$LOG_DIR/ui.log'
         echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
-        echo 'UI_VERSION="2"'
+        echo 'UI_VERSION="3"'
         echo 'OLLAMA_URL="http://127.0.0.1:11434"'
         echo 'MODEL=""'
         extract_function "$MOMOS_SH" is_number
@@ -1699,13 +1699,29 @@ page_has() {
 }
 
 page_has '/api/chat' 'the chat endpoint'
+page_has '/api/tags' 'the installed-model list the picker is built from'
 page_has 'runtime.json' 'the runtime config lookup'
 page_has 'AbortController' 'the stop button'
 page_has 'aria-live' 'the live-region attributes'
 page_has 'role="status"' 'the status region'
+page_has 'role="log"' 'the conversation region'
 page_has 'prefers-reduced-motion' 'a reduced-motion branch'
 page_has ':focus-visible' 'a visible focus style'
 page_has 'textContent' 'text-node insertion'
+
+# Saved chats. The store is per-browser rather than per-phone because the page
+# is served statically and has nowhere to write on the device, so these are the
+# features that carry that design, and the ones to check if it is ever revisited.
+page_has 'localStorage' 'saved chats'
+page_has 'aria-current' 'which saved chat is open'
+page_has 'aria-expanded' 'the chat-list toggle'
+page_has 'storageUsable' 'the guard against a browser that refuses storage'
+
+# tests/test-ui-store.sh extracts what sits between these two markers and runs it
+# under node. Lose them and that test finds an empty block — it fails rather than
+# passes, but the reason would point at the harness instead of at this edit.
+page_has '// --- store:begin ---' 'the start of the testable store block'
+page_has '// --- store:end ---' 'the end of the testable store block'
 
 # The page talks to the native API because /v1 cannot express keep_alive. If it
 # ever reached for the compatibility surface, the reasoning models the README

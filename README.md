@@ -163,7 +163,29 @@ MOMOS UI — running in the background
   Network: http://192.168.1.42:8080   <- open this on your laptop
 ```
 
-The page is a chat interface. It talks to whichever model you used last — run `momos chat <model>` once if it tells you no model is chosen. The conversation lives in memory only, so reloading clears it.
+The page is a chat interface with a model picker and a list of saved chats.
+
+The picker offers everything `momos models` would list, and each chat keeps the
+model it was using — so a DeepSeek R1 reasoning thread and a small quick model
+can sit side by side. A new chat starts from whichever model you used last; run
+`momos chat <model>` once if the page tells you no model is chosen. Picking a
+different model mid-conversation changes who answers from the next message on,
+and the replies already on screen stay as they were.
+
+Chats are saved in the browser, not on the phone, and reopening the page brings
+back the one you left off in. Two consequences worth knowing:
+
+- **The list is per browser.** The laptop's chats and the phone's chats are
+  separate, and so are two browsers on the laptop. A chat begun on one does not
+  appear on the other.
+- **Clearing site data clears them.** A private window will not save them at all,
+  and says so when it opens.
+
+Keeping them on the phone instead would mean a second server process holding
+state, which is memory the model wants more than your chat titles do.
+
+Reasoning is not saved with a chat — the fold is working-out you have already
+read, and keeping it would multiply the storage for no return.
 
 Opened **on the phone**, it reaches Ollama over loopback and needs nothing else. Opened **from a laptop**, it needs `momos serve --lan` running too.
 
