@@ -19,6 +19,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOMOS_SH="$REPO_ROOT/scripts/momos.sh"
 SETUP_SH="$REPO_ROOT/scripts/setup.sh"
 LEGACY_SH="$REPO_ROOT/scripts/legacy/proot/momos.sh"
+UI_HTML="$REPO_ROOT/scripts/ui/index.html"
 
 PASS=0
 FAIL=0
@@ -29,6 +30,10 @@ OUT=""
 RUN_STATUS=0
 DIAG=""
 FETCHED=""
+KEPT=""      # what survived on disk after a case that may have clobbered it
+JSON=""      # contents of a file a case generated
+LINES=""     # line count of that file
+CURLED=""    # whether a stub curl was invoked
 
 pass() { printf '  \033[0;32m✓\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 fail() { printf '  \033[0;31m✗\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
@@ -727,6 +732,555 @@ if [ "$OUT" = "KIND=" ]; then
     pass "no server reported when none is installed"
 else
     fail "expected empty KIND, got: '$OUT'"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — momos serve --lan"
+
+# cmd_serve is where "expose the server" is either true or a lie the user
+# cannot see through: a bare `ollama serve` looks identical to an exposed one
+# from inside the phone. Most of what follows checks the bind it chose.
+#
+# lan_ip and lan_reachable are stubbed rather than extracted — the address and
+# the reachability probe are inputs to the decision, not the decision. The
+# ollama stub prints the environment it was handed, which is the only way to
+# assert on an export that exists solely for the lifetime of that one command.
+serve_case() {
+    local args="$1" up="$2" ip="$3" reachable="$4" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    cat > "$tmp/ollama" <<'STUB'
+#!/bin/bash
+echo "OLLAMA_HOST=${OLLAMA_HOST:-<unset>}"
+echo "OLLAMA_ORIGINS=${OLLAMA_ORIGINS:-<unset>}"
+echo "OLLAMA_INVOKED=1"
+STUB
+    chmod +x "$tmp/ollama"
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'STATE_FILE=$LOG_DIR/state'
+        echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_VERSION="2"'
+        echo 'OLLAMA_URL="http://127.0.0.1:11434"'
+        echo 'MODEL=""'
+        echo "server_up() { return $up; }"
+        echo "lan_ip() { [ -n '$ip' ] || return 1; printf '%s\\n' '$ip'; }"
+        echo "lan_reachable() { return $reachable; }"
+        extract_function "$MOMOS_SH" print_lan_urls
+        extract_function "$MOMOS_SH" cmd_serve
+        echo "cmd_serve $args"
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    rm -rf "$tmp"
+}
+
+# The launcher has no info/success/warn/fail — those are installer-scope, and
+# the installer is long gone by the time this runs. Omitting harness_preamble
+# and emitting the real `set -euo pipefail` means a function that reached for
+# one would fail here as "command not found", exactly as it would on the phone.
+# It also re-checks the ${1:-} and `|| true` discipline the strict mode needs.
+serve_case '' 1 '192.168.1.42' 0
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -qxF 'OLLAMA_HOST=127.0.0.1:11434' <<< "$OUT" \
+    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OUT"; then
+    pass "bare 'serve' pins loopback and sets no origins"
+else
+    fail "bare 'serve' should bind 127.0.0.1 only (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+serve_case '--lan' 1 '192.168.1.42' 0
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OUT" \
+    && grep -qxF 'OLLAMA_ORIGINS=http://192.168.1.42:*' <<< "$OUT"; then
+    pass "'serve --lan' binds all interfaces with the exact-IP origin"
+else
+    fail "--lan should export OLLAMA_HOST=0.0.0.0:11434 and the exact-IP origin (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# A bare `*` would let any page the user visits drive and delete the phone's
+# models, and a subnet form would accept http://192.168.1.5.evil.com. The
+# exact-IP form is a real control, so it is asserted against explicitly.
+if grep -qxF 'OLLAMA_ORIGINS=*' <<< "$OUT"; then
+    fail "the origin must never be a bare '*': any web page could then use the phone"
+else
+    pass "the origin is never a bare '*'"
+fi
+
+serve_case '--lan' 1 '' 0
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OUT" \
+    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OUT" \
+    && grep -qF 'OLLAMA_ORIGINS=' <<< "$OUT"; then
+    pass "--lan with no detectable address still binds, and prints the override"
+else
+    fail "--lan should bind anyway and explain the CORS block (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# The failure this whole flag exists to prevent. A server started earlier by
+# `momos chat` is up, so the old code answered "already running" and exited 0
+# while the laptop could not connect and nothing on screen said so.
+serve_case '--lan' 0 '192.168.1.42' 1
+if [ "$RUN_STATUS" -ne 0 ] \
+    && grep -q 'momos stop' <<< "$OUT" \
+    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+    pass "loopback-only server: --lan explains, fails, and does not restart it"
+else
+    fail "a private server must not be reported as exposed (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# Not restarting matters: a restart would kill a chat in progress in the other
+# Termux session, so the reachable case must report and return without touching
+# the server.
+serve_case '--lan' 0 '192.168.1.42' 0
+if [ "$RUN_STATUS" -eq 0 ] \
+    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT" \
+    && grep -q '/v1' <<< "$OUT"; then
+    pass "already-exposed server: --lan reports success without restarting"
+else
+    fail "an already-exposed server should be reported, not restarted (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+serve_case '--lan' 0 '' 0
+if [ "$RUN_STATUS" -ne 0 ] && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+    pass "up server with no detectable address refuses to guess"
+else
+    fail "should not claim exposure when the address is unknown (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+serve_case '' 0 '192.168.1.42' 0
+if [ "$RUN_STATUS" -eq 0 ] && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+    pass "bare 'serve' over a running server still reports and returns"
+else
+    fail "bare 'serve' should keep today's already-running behaviour (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# A typo silently ignored would leave a loopback server running while the user
+# believes they are exposed.
+for bad in '-lan' '--lans'; do
+    serve_case "$bad" 1 '192.168.1.42' 0
+    if [ "$RUN_STATUS" -ne 0 ] \
+        && grep -q "Unknown option: $bad" <<< "$OUT" \
+        && grep -q 'Usage: momos serve' <<< "$OUT" \
+        && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+        pass "'$bad' rejected with usage instead of starting a private server"
+    else
+        fail "'$bad' must be rejected, not ignored (status=$RUN_STATUS)"
+        show "$OUT"
+    fi
+done
+
+serve_case '--lan --foo' 1 '192.168.1.42' 0
+if [ "$RUN_STATUS" -ne 0 ] \
+    && grep -q 'Too many arguments' <<< "$OUT" \
+    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+    pass "a second argument is refused rather than half-applied"
+else
+    fail "extra arguments should be refused (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+# The empty-address guard is not cosmetic: under `set -e` a curl to
+# "http://:11434" would abort the whole CLI, and `momos serve --lan` calls it
+# on a path where no address is already known.
+lan_reachable_case() {
+    local ip="$1" curl_status="$2" tmp
+    tmp=$(mktemp -d)
+
+    cat > "$tmp/curl" <<STUB
+#!/bin/bash
+echo "CURLED" >> '$tmp/curl.log'
+exit $curl_status
+STUB
+    chmod +x "$tmp/curl"
+
+    {
+        echo 'set -euo pipefail'
+        extract_function "$MOMOS_SH" lan_reachable
+        echo "if lan_reachable '$ip'; then echo REACHABLE; else echo UNREACHABLE; fi"
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    CURLED="$(grep -c CURLED "$tmp/curl.log" 2>/dev/null || echo 0)"
+    rm -rf "$tmp"
+}
+
+lan_reachable_case '' 0
+if [ "$RUN_STATUS" -eq 0 ] && [ "$OUT" = "UNREACHABLE" ] && [ "$CURLED" = "0" ]; then
+    pass "lan_reachable with no address gives up without probing the network"
+else
+    fail "an empty address must not be probed (status=$RUN_STATUS, curl=$CURLED)"
+    show "$OUT"
+fi
+
+lan_reachable_case '192.168.1.42' 7
+if [ "$RUN_STATUS" -eq 0 ] && [ "$OUT" = "UNREACHABLE" ] && [ "$CURLED" = "1" ]; then
+    pass "a refused probe reports unreachable rather than aborting under set -e"
+else
+    fail "a failed probe must return 1, not kill the CLI (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — the UI page stays current, and survives being offline"
+
+# The page is fetched, so there is a working copy and a network between them,
+# and every interesting failure lives in the gap: an install too old to have
+# the marker, a phone with no signal, and a captive portal answering 200 with
+# somebody else's HTML.
+#
+# The curl stub creates and truncates its -o target *before* it fails, because
+# real curl does — that is precisely the behaviour index.html.new exists to
+# contain, and a stub that failed without touching the file would not test it.
+ui_fetch_case() {
+    local cached="$1" curl_mode="$2" body="$3" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos/ui"
+
+    if [ -n "$cached" ]; then
+        printf '%s' "$cached" > "$tmp/home/.momos/ui/index.html"
+    fi
+
+    cat > "$tmp/curl" <<'STUB'
+#!/bin/bash
+out=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+echo "CALLED" >> "$CURL_LOG"
+if [ -n "$out" ]; then
+    printf '%s' "$CURL_BODY" > "$out"
+fi
+[ "$CURL_MODE" = fail ] && exit 22
+exit 0
+STUB
+    chmod +x "$tmp/curl"
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_VERSION="2"'
+        extract_function "$MOMOS_SH" ensure_ui_files
+        echo 'ensure_ui_files'
+        echo 'echo "REACHED_END"'
+    } > "$tmp/run.sh"
+
+    CURL_LOG="$tmp/curl.log" CURL_MODE="$curl_mode" CURL_BODY="$body" \
+        PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    FETCHED="$(cat "$tmp/curl.log" 2>/dev/null || true)"
+    KEPT="$(cat "$tmp/home/.momos/ui/index.html" 2>/dev/null || echo '<missing>')"
+    rm -rf "$tmp"
+}
+
+old_page='<!-- momos-ui:1 -->
+the older page'
+new_page='<!-- momos-ui:2 -->
+the newer page'
+
+ui_fetch_case "$new_page" fail ''
+if [ "$RUN_STATUS" -eq 0 ] && [ -z "$FETCHED" ] && grep -qx 'REACHED_END' <<< "$OUT"; then
+    pass "a current page is not fetched again"
+else
+    fail "the marker should short-circuit the fetch (status=$RUN_STATUS, curl='$FETCHED')"
+    show "$OUT"
+fi
+
+ui_fetch_case "$old_page" ok "$new_page"
+if [ "$RUN_STATUS" -eq 0 ] && [ "$KEPT" = "$new_page" ] && [ -n "$FETCHED" ]; then
+    pass "an outdated page is replaced"
+else
+    fail "an outdated page should be replaced, kept: '$KEPT'"
+    show "$OUT"
+fi
+
+ui_fetch_case '' ok "$new_page"
+if [ "$RUN_STATUS" -eq 0 ] && [ "$KEPT" = "$new_page" ]; then
+    pass "a first install writes the page"
+else
+    fail "a missing page should be installed, kept: '$KEPT'"
+    show "$OUT"
+fi
+
+# Offline-first. `momos update` on a phone with no network must not delete the
+# page it already has — the old code wrote straight to index.html with curl -o,
+# which truncates before the transfer can fail.
+ui_fetch_case "$old_page" fail "$new_page"
+if [ "$RUN_STATUS" -eq 0 ] && [ "$KEPT" = "$old_page" ]; then
+    pass "a failed refresh keeps the cached page byte-for-byte and exits 0"
+else
+    fail "an offline refresh must not destroy the working page (status=$RUN_STATUS)"
+    show "kept: $KEPT"
+    show "$OUT"
+fi
+
+# A captive portal is the reason the download is checked for our own marker at
+# all: it answers 200 with a login page, and a naive check for `curl` success
+# would install it and break the UI on the device.
+ui_fetch_case "$old_page" ok '<html>Sign in to the Wi-Fi</html>'
+if [ "$RUN_STATUS" -eq 0 ] && [ "$KEPT" = "$old_page" ]; then
+    pass "a response without the marker is refused and the old page kept"
+else
+    fail "a page that is not ours must not be installed, kept: '$KEPT'"
+    show "$OUT"
+fi
+
+# The fast path wants this exact version, not any marker: a page stamped for a
+# future launcher would otherwise pin the device on a page the CLI has moved
+# past. The trailing `-->` in the pattern is what makes the match exact.
+ui_fetch_case '<!-- momos-ui:20 -->
+ahead of the CLI' fail ''
+if [ "$RUN_STATUS" -eq 0 ] && [ -n "$FETCHED" ]; then
+    pass "the marker match is exact, not a prefix"
+else
+    fail "momos-ui:20 must not satisfy momos-ui:2 (curl='$FETCHED')"
+    show "$OUT"
+fi
+
+ui_fetch_case '' fail ''
+if [ "$RUN_STATUS" -ne 0 ] && grep -q 'Could not download the UI page' <<< "$OUT"; then
+    pass "no cached page and no network is still a hard failure"
+else
+    fail "a first install with no network must fail loudly (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — the runtime.json the page reads for its model"
+
+runtime_case() {
+    local model="$1" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/ui"
+
+    {
+        echo 'set -euo pipefail'
+        echo "UI_DIR='$tmp/ui'"
+        extract_function "$MOMOS_SH" write_runtime_json
+        echo "write_runtime_json '$model'"
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    JSON="$(cat "$tmp/ui/runtime.json" 2>/dev/null || echo '<missing>')"
+    LINES="$(wc -l < "$tmp/ui/runtime.json" 2>/dev/null | tr -d ' ' || echo 0)"
+    rm -rf "$tmp"
+}
+
+runtime_case 'deepseek-r1:1.5b'
+if [ "$RUN_STATUS" -eq 0 ] && [ "$JSON" = '{"model":"deepseek-r1:1.5b","ollama_port":11434}' ]; then
+    pass "a normal model is written verbatim"
+else
+    fail "unexpected runtime.json: '$JSON' (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# The state file is normally one line written by `momos chat`, but it is a file
+# on a phone that anything could have edited. A quote or backslash reaching the
+# JSON would produce a parse error the page reads as "no model", with nothing
+# on screen to explain why.
+runtime_case 'a"b\c'
+if [ "$RUN_STATUS" -eq 0 ] && [ "$JSON" = '{"model":"abc","ollama_port":11434}' ]; then
+    pass "quotes and backslashes are stripped rather than emitted raw"
+else
+    fail "unsafe characters should be stripped, got: '$JSON'"
+    show "$OUT"
+fi
+
+runtime_case ''
+if [ "$RUN_STATUS" -eq 0 ] && [ "$JSON" = '{"model":"","ollama_port":11434}' ]; then
+    pass "an empty state yields a valid object, not a malformed one"
+else
+    fail "an empty model should still be valid JSON, got: '$JSON'"
+    show "$OUT"
+fi
+
+runtime_case $'first\nsecond'
+if [ "$RUN_STATUS" -eq 0 ] \
+    && [ "$JSON" = '{"model":"first","ollama_port":11434}' ] \
+    && [ "$LINES" = "1" ]; then
+    pass "a multi-line state file yields one line of JSON"
+else
+    fail "a multi-line state should collapse to its first line, got: '$JSON' ($LINES lines)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — momos ui wiring"
+
+# cmd_ui has to have written runtime.json before serve_ui execs, because exec
+# replaces the process and no later statement ever runs. serve_ui is therefore
+# replaced after extraction — in the real script it execs, which would end this
+# harness. The launcher's own MODEL preamble is reproduced rather than assumed,
+# so what is tested is how the device actually reads its state.
+ui_wiring_case() {
+    local model="$1" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    if [ -n "$model" ]; then
+        printf '%s\n' "$model" > "$tmp/home/.momos/state"
+    fi
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'STATE_FILE=$LOG_DIR/state'
+        echo 'SERVER_LOG=$LOG_DIR/server.log'
+        echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_VERSION="2"'
+        echo 'OLLAMA_URL="http://127.0.0.1:11434"'
+        echo 'MODEL=""'
+        echo 'if [ -f "$STATE_FILE" ]; then'
+        echo '    MODEL=$(cat "$STATE_FILE")'
+        echo 'fi'
+        extract_function "$MOMOS_SH" is_number
+        extract_function "$MOMOS_SH" valid_port
+        extract_function "$MOMOS_SH" write_runtime_json
+        extract_function "$MOMOS_SH" cmd_ui
+        # Defined after cmd_ui, so these replace the real ones: later wins.
+        echo 'ensure_ui_files() { echo "STEP:ensure_ui"; mkdir -p "$UI_DIR"; }'
+        echo 'install_httpd() { echo darkhttpd; }'
+        echo 'lan_ip() { echo 192.168.1.42; }'
+        echo 'serve_ui() { echo "STEP:serve_ui"; cat "$UI_DIR/runtime.json"; }'
+        echo 'cmd_ui'
+    } > "$tmp/run.sh"
+
+    MOMOS_UI_NO_OPEN=1 PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    rm -rf "$tmp"
+}
+
+ui_wiring_case 'llama3.2:3b'
+ensure_line=$(grep -n 'STEP:ensure_ui' <<< "$OUT" | cut -d: -f1)
+serve_line=$(grep -n 'STEP:serve_ui' <<< "$OUT" | cut -d: -f1)
+json_line=$(grep -n '^{"model"' <<< "$OUT" | cut -d: -f1)
+
+if [ "$RUN_STATUS" -eq 0 ] \
+    && [ -n "$ensure_line" ] && [ -n "$serve_line" ] \
+    && [ "$ensure_line" -lt "$serve_line" ]; then
+    pass "the page is ensured before the server is started"
+else
+    fail "ordering wrong: ensure=$ensure_line serve=$serve_line (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+if [ -n "$json_line" ] && [ "$json_line" -gt "$serve_line" ]; then
+    pass "runtime.json is written by the time serve_ui runs"
+else
+    fail "runtime.json must exist before serve_ui (json=$json_line, serve=$serve_line)"
+    show "$OUT"
+fi
+
+if grep -qx '{"model":"llama3.2:3b","ollama_port":11434}' <<< "$OUT"; then
+    pass "runtime.json carries the last-used model through to the page"
+else
+    fail "expected the state file's model in runtime.json"
+    show "$OUT"
+fi
+
+# The launcher runs under `set -u`, and a first run has no state file at all.
+# An unbound $MODEL here would make `momos ui` fail before serving anything.
+ui_wiring_case ''
+if [ "$RUN_STATUS" -eq 0 ] && grep -qx '{"model":"","ollama_port":11434}' <<< "$OUT"; then
+    pass "ui works with no model chosen yet, under set -u"
+else
+    fail "an unset model must not abort 'momos ui' (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — the pieces two files must agree on"
+
+# Args reach cmd_serve only because the dispatcher shifts the command name off
+# first. Without the shift, even a bare `momos serve` lands in the
+# unknown-option branch, and `--lan` would be read as the command name.
+if grep -qE '^[[:space:]]*serve\)[[:space:]]+shift; cmd_serve "\$@" ;;' "$MOMOS_SH"; then
+    pass "the serve dispatch forwards its arguments"
+else
+    fail "dispatch must be 'serve) shift; cmd_serve \"\$@\" ;;' — options are dropped otherwise"
+fi
+
+# The version lives in two files that cannot import from each other: the
+# launcher is a quoted heredoc, so it cannot interpolate the page at install
+# time. Drifting apart means the device refetches forever, or never.
+script_version=$(sed -n 's/^UI_VERSION="\([^"]*\)"$/\1/p' "$MOMOS_SH" | head -n1)
+page_version=$(sed -n 's/.*<!-- momos-ui:\([0-9][0-9]*\) -->.*/\1/p' "$UI_HTML" | head -n1)
+
+if [ -n "$script_version" ] && [ "$script_version" = "$page_version" ]; then
+    pass "UI_VERSION in momos.sh matches the marker in index.html ($script_version)"
+else
+    fail "version drift: momos.sh has '$script_version', index.html has '$page_version'"
+fi
+
+help_text=$(sed -n '/^show_help() {/,/^}/p' "$MOMOS_SH")
+
+if grep -q 'serve \[--lan\]' <<< "$help_text"; then
+    pass "help documents 'serve [--lan]'"
+else
+    fail "help should document the --lan option"
+fi
+
+if grep -q 'momos stop' <<< "$help_text"; then
+    pass "help documents 'stop', which --lan's failure path tells the user to run"
+else
+    fail "help should list 'stop' — the loopback-only path sends you to it"
+fi
+
+# The page is static HTML with no build step, so nothing else would catch a
+# transport that was renamed or a marker that was dropped.
+page_has() {
+    if grep -qF "$1" "$UI_HTML"; then
+        pass "index.html has $2"
+    else
+        fail "index.html is missing $2 (expected to find '$1')"
+    fi
+}
+
+page_has '/api/chat' 'the chat endpoint'
+page_has 'runtime.json' 'the runtime config lookup'
+page_has 'AbortController' 'the stop button'
+page_has 'aria-live' 'the live-region attributes'
+page_has 'role="status"' 'the status region'
+page_has 'prefers-reduced-motion' 'a reduced-motion branch'
+page_has ':focus-visible' 'a visible focus style'
+page_has 'textContent' 'text-node insertion'
+
+# The page talks to the native API because /v1 cannot express keep_alive. If it
+# ever reached for the compatibility surface, the reasoning models the README
+# recommends would silently lose their thinking field.
+if grep -q '/v1' "$UI_HTML"; then
+    fail "index.html should use /api/chat — /v1 cannot express keep_alive or num_ctx"
+else
+    pass "index.html stays on the native API"
 fi
 
 # ---------------------------------------------------------------------------

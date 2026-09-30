@@ -362,6 +362,12 @@ LOG_DIR="$HOME/.momos"
 STATE_FILE="$LOG_DIR/state"
 SERVER_LOG="$LOG_DIR/server.log"
 UI_DIR="$LOG_DIR/ui"
+# Keep in step with the `momos-ui:` marker in scripts/ui/index.html. The
+# launcher compares the two and re-fetches the page on a mismatch, so an
+# existing install picks up a new page without a full reinstall. The number is
+# duplicated in the page on purpose: this heredoc is quoted, so interpolating it
+# here would expand every $VAR in the launcher at install time.
+UI_VERSION="2"
 OLLAMA_URL="http://127.0.0.1:11434"
 
 MODEL=""
@@ -474,6 +480,21 @@ lan_ip() {
     return 1
 }
 
+# Answers only when ollama is listening on the phone's Wi-Fi address, which can
+# only happen if it bound 0.0.0.0 rather than 127.0.0.1: connecting to the
+# phone's own LAN address still goes over the loopback interface, and a socket
+# bound to 127.0.0.1 refuses that address even from the phone itself. This is how
+# `momos serve --lan` tells "already exposed" from "already running but private"
+# instead of reporting success and leaving the laptop unable to connect.
+#
+# The timeout matters: a wedged server would otherwise hang the command with no
+# output at all, which looks exactly like a slow start.
+lan_reachable() {
+    local ip="${1:-}"
+    [ -n "$ip" ] || return 1
+    curl -fsS --max-time 2 "http://${ip}:11434/api/tags" > /dev/null 2>&1
+}
+
 # Termux ships no web server. darkhttpd is about 1MB and serves static files,
 # which is all this page needs; python would be roughly 40MB competing with the
 # models for space on the same device. Prefer whatever is already installed.
@@ -512,27 +533,71 @@ install_httpd() {
     return 1
 }
 
-# The page lives on the device so the UI works with no network; a missing file
-# is re-fetched from the same ref the rest of the CLI follows.
+# The page lives on the device so the UI works with no network; a missing or
+# outdated one is re-fetched from the same ref the rest of the CLI follows.
+#
+# A refresh that fails leaves the page already on the phone in place. That is
+# the point of the design: an old page still serves, and the next run or
+# `momos update` retries. Removing it because the phone happens to be offline
+# would break the one thing this function exists to guarantee.
 ensure_ui_files() {
     mkdir -p "$UI_DIR"
-
-    if [ -f "$UI_DIR/index.html" ]; then
-        return 0
-    fi
 
     local branch url
     branch=$(cat "$LOG_DIR/branch" 2>/dev/null || echo main)
     branch="${MOMOS_BRANCH:-$branch}"
     url="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${branch}/scripts/ui/index.html"
 
-    echo "Fetching the UI page..."
-    if ! curl -fsSL "$url" -o "$UI_DIR/index.html"; then
-        rm -f "$UI_DIR/index.html"
-        echo "Could not download the UI page:"
-        echo "  $url"
-        exit 1
+    # The marker is the page's own version stamp. Matching the exact version (not
+    # just any marker) is what makes this a fast path, and the trailing `-->`
+    # keeps `momos-ui:2` from matching a page stamped `momos-ui:20`.
+    if [ -f "$UI_DIR/index.html" ] \
+        && grep -q "<!-- momos-ui:${UI_VERSION} -->" "$UI_DIR/index.html" 2>/dev/null; then
+        return 0
     fi
+
+    if [ -f "$UI_DIR/index.html" ]; then
+        echo "Updating the UI page..."
+    else
+        echo "Fetching the UI page..."
+    fi
+
+    # Download beside the old file and move it in only once it is really our
+    # page: curl -o truncates its target before it can fail, so writing straight
+    # to index.html would destroy a working page on a dropped connection. Any
+    # marker will do here — requiring this exact version would refetch forever
+    # while the page on a branch runs ahead of a launcher that is due an update.
+    if curl -fsSL "$url" -o "$UI_DIR/index.html.new" \
+        && grep -q "momos-ui:" "$UI_DIR/index.html.new" 2>/dev/null; then
+        mv "$UI_DIR/index.html.new" "$UI_DIR/index.html"
+        return 0
+    fi
+
+    rm -f "$UI_DIR/index.html.new"
+
+    if [ -f "$UI_DIR/index.html" ]; then
+        echo "Could not update the UI page — serving the one already on the phone."
+        echo "  $url"
+        return 0
+    fi
+
+    echo "Could not download the UI page:"
+    echo "  $url"
+    exit 1
+}
+
+# The page has no model picker, so it reads the last-used model from here. The
+# file sits beside index.html because darkhttpd serves that directory, and is
+# rewritten on every `momos ui` so it cannot drift from the CLI's own state.
+#
+# That state is normally one line written by `momos chat`, but a hand-edited file
+# could hold anything. Taking the first line and dropping quotes and backslashes
+# keeps a stray character from producing invalid JSON, which the page would read
+# as "no model" with nothing on screen to explain why.
+write_runtime_json() {
+    local model="${1:-}"
+    model=$(printf '%s\n' "$model" | head -n1 | tr -d '"\\')
+    printf '{"model":"%s","ollama_port":11434}\n' "$model" > "$UI_DIR/runtime.json"
 }
 
 # Foreground, so only one extra process is ever running alongside the models.
@@ -563,7 +628,8 @@ show_help() {
     echo "Commands:"
     echo "  chat [model]          Start chatting (default: last used model)"
     echo "  ui [port]             Serve the web UI on your network (default port 8080)"
-    echo "  serve                 Run the Ollama server in the foreground"
+    echo "  serve [--lan]         Run the Ollama server in the foreground"
+    echo "  stop                  Stop the background server"
     echo "  models list           Show all installed models"
     echo "  models pull <name>    Download a new model"
     echo "  models delete <name>  Remove an installed model"
@@ -577,6 +643,8 @@ show_help() {
     echo "  momos chat deepseek-r1:1.5b      Chat with a specific model"
     echo "  momos ui                         Serve the web UI on port 8080"
     echo "  momos ui 9000                    Serve it on port 9000 instead"
+    echo "  momos serve --lan                Expose Ollama to other devices"
+    echo "  momos stop                       Stop the background server"
     echo "  momos models list                See what's installed"
     echo "  momos models pull qwen2.5:3b     Download Qwen 2.5 3B"
     echo "  momos models delete llama3.2:3b  Remove a model"
@@ -617,6 +685,11 @@ cmd_ui() {
 
     ensure_ui_files
 
+    # The page reads the last-used model from here. Written before install_httpd
+    # and before serve_ui, which execs and never returns, so the file is in place
+    # whichever static server ends up running.
+    write_runtime_json "$MODEL"
+
     local kind
     if ! kind=$(install_httpd); then
         echo "Could not find or install a static file server."
@@ -648,15 +721,118 @@ cmd_ui() {
     serve_ui "$kind" "$port"
 }
 
-cmd_serve() {
-    if server_up; then
-        echo "Ollama is already running."
-        echo "Use 'momos logs' to follow its output, or stop it with 'momos stop'."
-        exit 0
-    fi
-    echo "Starting Ollama server in the foreground (Ctrl+C to stop)..."
+# Printed before the server starts so the URLs stay on screen while it runs.
+# Bare echo: the launcher has no colour helpers, those belong to the installer,
+# which is long gone by the time this runs.
+print_lan_urls() {
+    local ip="$1"
+    echo "  Ollama:            http://${ip}:11434"
+    echo "  OpenAI-compatible: http://${ip}:11434/v1"
+    echo "                     (any non-empty key; the server ignores it)"
+    echo "  Chat page:         run 'momos ui' in a second Termux session,"
+    echo "                     then open http://${ip}:8080"
     echo ""
-    ollama serve
+    echo "  No login: anyone on your Wi-Fi can reach these, and the API is not"
+    echo "  read-only — they can list, pull and delete your models."
+    echo "  Generating is CPU-heavy; the phone will slow down. Ctrl+C to stop."
+    echo ""
+}
+
+cmd_serve() {
+    local lan_mode=0 ip
+
+    # A typo like `-lan` silently ignored would leave a loopback server running
+    # while the user believes they are exposed, which is the exact failure this
+    # flag exists to remove. Reject anything unrecognised instead.
+    if [ "$#" -gt 1 ]; then
+        echo "Too many arguments."
+        echo ""
+        echo "Usage: momos serve [--lan]"
+        exit 1
+    fi
+
+    case "${1:-}" in
+        --lan) lan_mode=1 ;;
+        "")    ;;
+        *)
+            echo "Unknown option: $1"
+            echo ""
+            echo "Usage: momos serve [--lan]"
+            echo "  --lan  also expose Ollama to other devices on your Wi-Fi"
+            exit 1
+            ;;
+    esac
+
+    if server_up; then
+        if [ "$lan_mode" -eq 0 ]; then
+            echo "Ollama is already running."
+            echo "Use 'momos logs' to follow its output, or stop it with 'momos stop'."
+            exit 0
+        fi
+
+        ip=$(lan_ip || true)
+        if [ -z "$ip" ]; then
+            echo "Ollama is already running, but this phone's address could not be"
+            echo "detected, so there is no way to confirm it is exposed. To be sure:"
+            echo ""
+            echo "  momos stop && momos serve --lan"
+            exit 1
+        fi
+
+        if lan_reachable "$ip"; then
+            echo "Ollama is already running and already reachable on your Wi-Fi."
+            echo ""
+            print_lan_urls "$ip"
+            exit 0
+        fi
+
+        # What this branch exists for: `momos chat` or `momos models` started the
+        # server on loopback earlier in some other session, so the old "already
+        # running" answer was true and useless — the laptop cannot reach it and
+        # nothing on screen said so.
+        echo "Ollama is already running, but only on this phone (127.0.0.1), so a"
+        echo "laptop cannot reach it. The bind only changes on a restart:"
+        echo ""
+        echo "  momos stop"
+        echo "  momos serve --lan"
+        exit 1
+    fi
+
+    if [ "$lan_mode" -eq 0 ]; then
+        echo "Starting Ollama server in the foreground (Ctrl+C to stop)..."
+        echo ""
+        # Pinned rather than inherited: anyone with OLLAMA_HOST exported in their
+        # shell profile would otherwise expose the server without asking for it.
+        OLLAMA_HOST=127.0.0.1:11434 ollama serve
+        return
+    fi
+
+    echo "Starting Ollama server, exposed to your Wi-Fi (Ctrl+C to stop)..."
+    echo ""
+
+    ip=$(lan_ip || true)
+    if [ -z "$ip" ]; then
+        # Bind anyway: a native client sends no Origin header, so only browsers
+        # are blocked. Say which, rather than failing the whole command.
+        echo "Could not detect this phone's address, so browser access will be"
+        echo "blocked by Ollama's CORS check. Other clients — curl, the OpenAI"
+        echo "SDKs — send no Origin and are unaffected."
+        echo ""
+        echo "To allow browsers anyway, set the origin by hand:"
+        echo ""
+        echo "  OLLAMA_HOST=0.0.0.0 OLLAMA_ORIGINS='http://<phone-ip>:*' ollama serve"
+        echo ""
+        OLLAMA_HOST=0.0.0.0:11434 ollama serve
+        return
+    fi
+
+    print_lan_urls "$ip"
+    # The exact-IP form, never a subnet wildcard. Origins containing `*` match as
+    # prefix+suffix, so `http://192.168.1.*` would also accept a hostile origin
+    # such as http://192.168.1.5.evil.com, while `http://<ip>:*` pins the host
+    # exactly and leaves the port free — which is what the page needs, since
+    # `momos ui` can be given any port.
+    OLLAMA_HOST=0.0.0.0:11434 OLLAMA_ORIGINS="http://${ip}:*" ollama serve
 }
 
 cmd_stop() {
@@ -825,7 +1001,7 @@ cmd_menu() {
 case "${1:-}" in
     chat)      shift; cmd_chat "$@" ;;
     ui)        shift; cmd_ui "$@" ;;
-    serve)     cmd_serve ;;
+    serve)     shift; cmd_serve "$@" ;;
     stop)      cmd_stop ;;
     models)    shift; cmd_models "$@" ;;
     logs)      cmd_logs ;;
@@ -851,10 +1027,15 @@ install_ui() {
     local url="$MOMOS_RAW/scripts/ui/index.html"
     mkdir -p "$UI_DIR"
 
-    if curl -fsSL "$url" -o "$UI_DIR/index.html"; then
+    # The same download-beside-then-move dance as ensure_ui_files, for the same
+    # reason: curl -o truncates its target before it can fail, so an update on a
+    # phone with no network would otherwise delete a page that still works.
+    if curl -fsSL "$url" -o "$UI_DIR/index.html.new" \
+        && grep -q "momos-ui:" "$UI_DIR/index.html.new" 2>/dev/null; then
+        mv "$UI_DIR/index.html.new" "$UI_DIR/index.html"
         success "Installed web UI page"
     else
-        rm -f "$UI_DIR/index.html"
+        rm -f "$UI_DIR/index.html.new"
         warn "Could not download the web UI page — 'momos ui' will retry when you run it"
     fi
 }

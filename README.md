@@ -8,6 +8,8 @@
 
 Run lightweight AI models locally on your Android phone using Termux and Ollama. One command to install, no root needed, runs completely offline.
 
+Nothing leaves your phone unless you ask it to. The model server listens on the phone itself; `momos serve --lan` is the one command that opens it to your Wi-Fi.
+
 ![MOMOS installation in Termux](assets/termux.png)
 
 ## What it does
@@ -79,7 +81,52 @@ momos logs                       # View live Ollama server output (Ctrl+C to exi
 ![Ollama server logs](assets/ollama-server.png)
 
 > [!NOTE]
-> The Ollama server starts automatically in the background when running `momos chat` or managing models. You only need `momos logs` if you want to inspect server output directly.
+> The Ollama server starts automatically in the background when running `momos chat` or managing models, and it starts **on the phone only**. You only need `momos logs` if you want to inspect server output directly.
+
+```bash
+momos serve                      # Run the server in the foreground, on the phone only
+momos serve --lan                # Run it exposed to your Wi-Fi
+momos stop                       # Stop the background server
+```
+
+`momos chat` and `momos models` start the server for you on `127.0.0.1` and leave it running. That is deliberately private: nothing on your network can reach it. `momos serve --lan` is the only way to change that.
+
+### Chat from another device
+
+```bash
+momos serve --lan
+```
+
+This rebinds Ollama to all interfaces and tells it which browser origins to accept, then prints the addresses:
+
+```
+  Ollama:            http://192.168.1.42:11434
+  OpenAI-compatible: http://192.168.1.42:11434/v1
+                     (any non-empty key; the server ignores it)
+```
+
+Run it in one Termux session and `momos ui` in a second, and the phone and anything else on your Wi-Fi can both chat with the same model.
+
+**OpenAI-compatible API**
+
+`http://<phone-ip>:11434/v1` is a drop-in OpenAI base URL, so existing SDKs and tools work unchanged:
+
+```bash
+curl http://192.168.1.42:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"llama3.2:3b","messages":[{"role":"user","content":"hi"}]}'
+```
+
+Some clients insist on an API key. Ollama requires a non-empty one and then ignores it, so any string will do — `ollama` is the conventional choice.
+
+> [!WARNING]
+> **There is no authentication.** Anyone on your Wi-Fi who has the address gets the whole API, not just chat — they can list, pull and **delete** your models. The origin check stops other *websites* from reaching your phone; it does nothing about `curl`. Use `--lan` only on a network you trust, and press Ctrl+C when you are done.
+
+> [!NOTE]
+> Exposure is not remembered. A server started later by `momos chat` or `momos models` comes back private, and so does one after a reboot — re-run `momos serve --lan`. If you run it while a private server is already up, it says so rather than appearing to succeed: the bind only changes on a restart, so it tells you to `momos stop` first.
+
+> [!TIP]
+> If you only want to chat from a browser, you do not need `--lan` on the phone that is serving the page. See below.
 
 ### Web UI
 
@@ -98,13 +145,19 @@ MOMOS UI
   Network: http://192.168.1.42:8080   <- open this on your laptop
 ```
 
+The page is a chat interface. It talks to whichever model you used last — run `momos chat <model>` once if it tells you no model is chosen. The conversation lives in memory only, so reloading clears it.
+
+Opened **on the phone**, it reaches Ollama over loopback and needs nothing else. Opened **from a laptop**, it needs `momos serve --lan` running too.
+
 > [!WARNING]
 > The port has no authentication — anyone on your Wi-Fi who has the address can
 > open the page. Stop it with Ctrl+C when you are done.
 
-> [!NOTE]
-> This is a placeholder page for now — it confirms the server, the port and the
-> network path all work. The chat interface is not built yet.
+> [!IMPORTANT]
+> Both the page and the `--lan` flag ship with the installer, so an existing
+> install picks them up from `momos update`. Running `momos ui` alone on an
+> install that predates them will serve the old placeholder page, and
+> `momos serve --lan` will ignore the flag. Update first.
 
 `momos ui` uses [darkhttpd](https://github.com/emikulic/darkhttpd) (about 1MB),
 installing it on first use. If darkhttpd is unavailable it falls back to
@@ -197,6 +250,28 @@ momos chat deepseek-r1:1.5b
 
 ### Keeping Termux alive in background
 Run `termux-wake-lock` to keep Android from sleeping Termux during inference.
+
+### The laptop can't reach the model
+
+Two causes look identical from the browser, so check both.
+
+**The server is private.** `momos chat` and `momos models` start Ollama on the phone only. Run:
+
+```bash
+momos serve --lan
+```
+
+If it reports that the server is already running but only on this phone, that is the answer — run `momos stop` and then `momos serve --lan` again. The bind only changes on a restart.
+
+**The browser's origin is no longer allowed.** `--lan` pins the origin to the phone's address at the moment it starts. If the phone got a new address since (a fresh DHCP lease, or a different network), the page still loads but its requests are refused. Restart `momos serve --lan` to re-pin it.
+
+### The web page says no model is chosen
+
+It reads the last model you used. Pick one in Termux first:
+
+```bash
+momos chat llama3.2:1b
+```
 
 ---
 

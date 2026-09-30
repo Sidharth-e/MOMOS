@@ -5,16 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="robots" content="noindex">
+<!-- momos-ui:2 -->
 <title>MOMOS — web ui</title>
 <!--
-  Placeholder page for `momos ui`.
+  The chat page for `momos ui`.
 
   Deliberately self-contained: no external stylesheet, font or script. It is
   served off a phone that may have no network of its own, so anything fetched
   from a CDN would be the one thing on the page that fails.
 
-  The only live element is the address the browser arrived on, read from
-  location — no request is made, so this page cannot break on CORS.
+  The server it talks to is Ollama on this same device, reached at the address
+  this browser actually dialled. That is the whole trick: open the page on the
+  phone and it dials loopback, open it from a laptop and it dials the phone's
+  address on the Wi-Fi, and neither needs configuring.
+
+  The `momos-ui:` marker above is a version stamp. The launcher and installer
+  look for it to decide whether the copy on the device is current, so it must
+  stay, and its number must match UI_VERSION in scripts/momos.sh.
 -->
 <style>
   :root {
@@ -38,10 +45,12 @@
 
   body {
     margin: 0;
+    /* Top-aligned rather than centred: a conversation grows downward, and a
+       vertically centred column would drift as replies arrive. */
     padding: clamp(1.5rem, 6vw, 4rem) 16px;
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     background: var(--paper);
     color: var(--text);
@@ -83,32 +92,6 @@
     color: var(--muted);
   }
 
-  .lede {
-    margin: 0 0 2rem;
-    max-width: 56ch;
-  }
-
-  .report {
-    margin: 0 0 2rem;
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.35rem 1.5rem;
-    font-size: var(--step-0);
-  }
-
-  .report dt {
-    color: var(--muted);
-  }
-
-  .report dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .report dd.live {
-    color: var(--phosphor);
-  }
-
   .notice {
     margin: 0 0 2rem;
     padding-left: 0.9rem;
@@ -123,17 +106,147 @@
     font-weight: 600;
   }
 
-  /* Where the chat interface will be. A prompt with nothing typed yet is the
-     honest picture of this page's state. */
-  .next {
-    margin: 0;
-    color: var(--muted);
-    font-size: var(--step-0);
+  .notice[hidden] { display: none; }
+
+  /* The conversation. */
+  .log {
+    margin: 0 0 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
   }
 
-  .next .prompt {
+  .body {
+    margin: 0;
+    white-space: pre-wrap;
+    /* A long unbroken token — a URL, a hash — must wrap, and this column is
+       only ever as wide as a phone. */
+    overflow-wrap: anywhere;
+  }
+
+  /* A shell prompt for what you typed. Drawn by the stylesheet rather than
+     written into the text, so it can never be selected, copied, or sent to the
+     model as part of your message. */
+  .turn.user .body::before {
+    content: "> ";
     color: var(--phosphor);
-    margin-right: 0.6ch;
+  }
+
+  /* The reply, marked with the same left rule the notice uses. */
+  .turn.assistant .body {
+    border-left: 2px solid var(--line);
+    padding-left: 0.9rem;
+  }
+
+  .body.failed {
+    border-left-color: var(--amber);
+    color: var(--amber);
+  }
+
+  /* DeepSeek R1 and friends stream their working-out in a separate field. It
+     is folded away and dimmed because it is reasoning, not the reply — but it
+     has to be shown, or those models look like a long silence followed by an
+     answer that came from nowhere. */
+  .think {
+    margin: 0 0 0.6rem;
+    padding-left: 0.9rem;
+    border-left: 2px solid var(--line);
+    font-size: var(--step-0);
+    color: var(--muted);
+  }
+
+  .think summary {
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .think summary::-webkit-details-marker { display: none; }
+
+  .think summary::before { content: "+ "; }
+
+  .think[open] summary::before { content: "- "; }
+
+  .think pre {
+    margin: 0.4rem 0 0;
+    font: inherit;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.6rem;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 0.6rem;
+  }
+
+  /* The box lights up rather than the textarea drawing its own outline, which
+     would sit awkwardly inside the border. */
+  .composer:focus-within { border-color: var(--phosphor); }
+
+  .composer textarea {
+    flex: 1;
+    min-width: 0;
+    resize: none;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    line-height: 1.5;
+    max-height: 40vh;
+  }
+
+  .composer textarea:focus { outline: none; }
+
+  .composer button {
+    flex: none;
+    font: inherit;
+    color: var(--phosphor);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 0.35rem 0.85rem;
+    cursor: pointer;
+  }
+
+  .composer button:hover:not(:disabled) { border-color: var(--phosphor); }
+
+  .composer button:disabled {
+    color: var(--muted);
+    cursor: default;
+  }
+
+  .composer button[hidden] { display: none; }
+
+  .status {
+    margin: 0.9rem 0 0;
+    min-height: 1.3em;
+    font-size: var(--step-0);
+    color: var(--muted);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  a {
+    color: var(--phosphor);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--phosphor);
+    outline-offset: 3px;
   }
 
   .cursor {
@@ -155,22 +268,8 @@
     .cursor { animation: none; }
   }
 
-  a {
-    color: var(--phosphor);
-    text-decoration: underline;
-    text-underline-offset: 0.2em;
-  }
-
-  :focus-visible {
-    outline: 2px solid var(--phosphor);
-    outline-offset: 3px;
-  }
-
-  /* One narrow column: the labels stack above their values rather than
-     squeezing both onto a 375px screen. */
   @media (max-width: 30rem) {
-    .report { grid-template-columns: 1fr; gap: 0; }
-    .report dd { margin-bottom: 0.6rem; }
+    .frame { margin-bottom: 1.5rem; }
   }
 </style>
 </head>
@@ -181,47 +280,371 @@
       <p class="subtitle">web ui</p>
     </header>
 
-    <p class="lede">
-      This page is a placeholder. The server, the port and the network path
-      all work — what belongs here is the chat interface.
-    </p>
+    <p class="notice" id="banner" hidden></p>
 
-    <dl class="report">
-      <dt>reached at</dt>
-      <dd class="live" id="host">checking&hellip;</dd>
+    <!-- aria-live is off on the log on purpose. A polite live region over a
+         token-by-token stream reads every fragment aloud, which is unusable.
+         Arrivals and state changes are announced through #status instead. -->
+    <div class="log" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
 
-      <dt>this phone</dt>
-      <dd id="reach">checking&hellip;</dd>
+    <form class="composer" id="composer" autocomplete="off">
+      <label class="sr-only" for="prompt">Message</label>
+      <textarea id="prompt" rows="1" spellcheck="false"
+                placeholder="ask something"></textarea>
+      <button type="submit" id="send">Send</button>
+      <button type="button" id="stop" hidden>Stop</button>
+    </form>
 
-      <dt>ollama</dt>
-      <dd>running on the phone at 127.0.0.1:11434</dd>
-    </dl>
-
-    <p class="notice">
-      <strong>No login.</strong> Anyone on this Wi-Fi who has the address can
-      open this page. Stop it with Ctrl+C in Termux when you are done.
-    </p>
-
-    <p class="next">
-      <span class="prompt">&gt;</span>chat interface goes here<span class="cursor" aria-hidden="true"></span>
-    </p>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
   </main>
 
   <script>
     (function () {
-      var host = document.getElementById('host');
-      var reach = document.getElementById('reach');
+      'use strict';
 
-      // location.host is exactly what this browser dialled, which is the one
-      // fact worth confirming: it proves which address actually resolves.
-      host.textContent = location.host || 'unknown';
+      var logEl = document.getElementById('log');
+      var form = document.getElementById('composer');
+      var input = document.getElementById('prompt');
+      var sendBtn = document.getElementById('send');
+      var stopBtn = document.getElementById('stop');
+      var statusEl = document.getElementById('status');
+      var banner = document.getElementById('banner');
 
-      var name = location.hostname;
-      var onPhone = name === 'localhost' || name === '127.0.0.1' || name === '::1' || name === '[::1]';
+      var PORT = 11434;   // replaced by whatever runtime.json says
+      var BASE = null;
+      var MODEL = '';
+      var history = [];   // completed turns only: [{role, content}]
+      var controller = null;
+      var current = null; // the reply being streamed
 
-      reach.textContent = onPhone
-        ? 'you are on the phone itself; other devices need the network address'
-        : 'reachable from other devices on this Wi-Fi';
+      function isLocal(host) {
+        return host === 'localhost' || host === '127.0.0.1' ||
+               host === '::1' || host === '[::1]';
+      }
+
+      // The host comes from the address this browser actually dialled, so the
+      // origin the request carries and the origin the server was told to allow
+      // always agree. Loopback is spelled 127.0.0.1 rather than localhost: a
+      // name that resolves to ::1 first would miss an IPv4-only bind.
+      function baseUrl(host, port) {
+        return 'http://' + (isLocal(host) ? '127.0.0.1' : host) + ':' + port;
+      }
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function setBusy(busy) {
+        sendBtn.disabled = busy || !MODEL;
+        stopBtn.hidden = !busy;
+      }
+
+      function scrollToEnd() {
+        var last = logEl.lastElementChild;
+        if (last) last.scrollIntoView({ block: 'end' });
+      }
+
+      // Text goes in as a text node, never as markup, and there is no Markdown
+      // renderer anywhere on this page. Model output is therefore inserted
+      // literally: no dependency, and no way for a reply to become script.
+      function appendText(parent, text) {
+        parent.appendChild(document.createTextNode(text));
+      }
+
+      function addTurn(role) {
+        var turn = document.createElement('article');
+        turn.className = 'turn ' + role;
+
+        var body = document.createElement('p');
+        body.className = 'body';
+
+        // Content goes in this span so the generating caret can sit after it.
+        var answer = document.createElement('span');
+        body.appendChild(answer);
+        turn.appendChild(body);
+        logEl.appendChild(turn);
+
+        return {
+          turn: turn, body: body, answer: answer,
+          think: null, caret: null, text: '', failed: false
+        };
+      }
+
+      function showCaret(t) {
+        if (t.caret) return;
+        t.caret = document.createElement('span');
+        t.caret.className = 'cursor';
+        t.caret.setAttribute('aria-hidden', 'true');
+        t.body.appendChild(t.caret);
+      }
+
+      function hideCaret(t) {
+        if (t.caret && t.caret.parentNode) t.caret.parentNode.removeChild(t.caret);
+        t.caret = null;
+      }
+
+      // The reasoning fold is created the first time a model actually streams
+      // any, so models without one never show an empty box.
+      function thinkingSink(t) {
+        if (t.think) return t.think;
+        var det = document.createElement('details');
+        det.className = 'think';
+        var sum = document.createElement('summary');
+        sum.textContent = 'reasoning';
+        var pre = document.createElement('pre');
+        det.appendChild(sum);
+        det.appendChild(pre);
+        t.turn.insertBefore(det, t.body);
+        t.think = pre;
+        return pre;
+      }
+
+      function handleLine(line) {
+        line = line.replace(/\r$/, '').trim();
+        if (!line) return;
+
+        var obj;
+        try {
+          obj = JSON.parse(line);
+        } catch (e) {
+          // A chunk can end mid-line, and the buffer holds the tail until its
+          // newline arrives. Anything still unparseable here is skipped rather
+          // than abandoning a reply that is otherwise arriving fine.
+          return;
+        }
+
+        if (obj.error) { failTurn(withHint(String(obj.error))); return; }
+
+        // An error line ends the reply. Anything the server sends afterwards
+        // belongs to a turn that is already over.
+        if (current.failed) return;
+
+        if (obj.message) {
+          if (obj.message.thinking) {
+            appendText(thinkingSink(current), obj.message.thinking);
+          }
+          if (obj.message.content) {
+            appendText(current.answer, obj.message.content);
+            current.text += obj.message.content;
+          }
+          scrollToEnd();
+        }
+
+        if (obj.done) hideCaret(current);
+      }
+
+      // Ollama declares only a 200 in its spec but does return {"error": ...}
+      // in practice — a deleted model, most often — so the body is read rather
+      // than assumed empty.
+      function serverError(body, status) {
+        var msg = '';
+        try { msg = JSON.parse(body).error || ''; } catch (e) { msg = ''; }
+        if (msg) return withHint(msg);
+        return withHint(body.slice(0, 300) || ('HTTP ' + status));
+      }
+
+      function withHint(msg) {
+        if (MODEL && /not found|no such|try pulling/i.test(msg)) {
+          return msg + '\n\nOn the phone:  momos models pull ' + MODEL;
+        }
+        return msg;
+      }
+
+      // A refused connection and a CORS rejection are indistinguishable from
+      // JavaScript — both arrive as a TypeError carrying no status and no
+      // message — so the text names both causes instead of guessing at one.
+      function describeFailure(err) {
+        return 'Could not reach Ollama at ' + BASE + '.\n\n' +
+          'Two causes look identical from here, so check both:\n' +
+          '  - the server is not exposed to this network.\n' +
+          '    On the phone:  momos serve --lan\n' +
+          '  - this page\'s origin is not allowed by the server.\n' +
+          '    Start it with:  OLLAMA_ORIGINS="http://' + location.hostname + ':*"\n' +
+          (err && err.message ? '\nThe browser said: ' + err.message : '');
+      }
+
+      function failTurn(msg) {
+        if (!current) return;
+        hideCaret(current);
+        current.failed = true;
+        current.text = '';
+        current.answer.textContent = '';
+        current.body.className = 'body failed';
+        current.body.textContent = msg;
+        setStatus('failed');
+        scrollToEnd();
+      }
+
+      // The NDJSON reader. Ollama sends one JSON object per line and a chunk
+      // boundary can land anywhere, including inside a character, so bytes are
+      // decoded in stream mode and only complete lines are consumed.
+      function readStream(res) {
+        if (!res.ok) {
+          return res.text().then(function (body) {
+            var err = new Error(serverError(body, res.status));
+            // Named, because the catch below has to tell a real answer from
+            // the server apart from a connection that never happened: only the
+            // latter is worth the OLLAMA_ORIGINS troubleshooting text, and a
+            // bare TypeError is all the browser gives us to go on.
+            err.name = 'ServerError';
+            throw err;
+          });
+        }
+
+        if (!res.body) {
+          // No streaming support: read it whole and replay it line by line.
+          return res.text().then(function (all) {
+            all.split('\n').forEach(handleLine);
+          });
+        }
+
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function pump() {
+          return reader.read().then(function (chunk) {
+            if (chunk.done) {
+              // A last line without its trailing newline is normal, not a
+              // truncation.
+              if (buffer.trim()) handleLine(buffer);
+              return;
+            }
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var nl;
+            while ((nl = buffer.indexOf('\n')) !== -1) {
+              handleLine(buffer.slice(0, nl));
+              buffer = buffer.slice(nl + 1);
+            }
+            return pump();
+          });
+        }
+
+        return pump();
+      }
+
+      function send(text) {
+        history.push({ role: 'user', content: text });
+        appendText(addTurn('user').answer, text);
+
+        current = addTurn('assistant');
+        showCaret(current);
+        setBusy(true);
+        setStatus('generating');
+
+        controller = new AbortController();
+
+        fetch(BASE + '/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: history,
+            stream: true,
+            keep_alive: '5m'
+            // num_ctx is deliberately not set. Raising it multiplies the KV
+            // cache, and this server is a phone; the native endpoint is used so
+            // that it *can* be set, not because this page sets it.
+          }),
+          signal: controller.signal
+        })
+          .then(readStream)
+          .catch(function (err) {
+            if (err && err.name === 'AbortError') {
+              // Stopping is not failing. There is no server-side cancel, so the
+              // abort closes the connection, which is what tells ollama to stop.
+              setStatus('stopped');
+              return;
+            }
+            failTurn(err && err.name === 'ServerError'
+              ? err.message
+              : describeFailure(err));
+          })
+          .then(function () {
+            // Runs after success, failure and stop alike. Whatever text did
+            // arrive is a real turn, and dropping it would leave the model's
+            // context and the screen disagreeing.
+            hideCaret(current);
+            if (current && current.text) {
+              history.push({ role: 'assistant', content: current.text });
+            }
+            current = null;
+            controller = null;
+            setBusy(false);
+            if (statusEl.textContent === 'generating') setStatus('done');
+            input.focus();
+          });
+      }
+
+      function submit() {
+        if (controller) return;   // one request at a time
+        var text = input.value.trim();
+        if (!text || !MODEL) return;
+        input.value = '';
+        autosize();
+        send(text);
+      }
+
+      function autosize() {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px';
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        submit();
+      });
+
+      // Enter sends and Shift+Enter breaks the line, which is what every chat
+      // box does; the exception is a phone keyboard, where Enter is the only
+      // key there is.
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          submit();
+        }
+      });
+
+      input.addEventListener('input', autosize);
+
+      stopBtn.addEventListener('click', function () {
+        if (controller) controller.abort();
+      });
+
+      function init(cfg) {
+        if (cfg && typeof cfg.ollama_port === 'number') PORT = cfg.ollama_port;
+        BASE = baseUrl(location.hostname, PORT);
+
+        MODEL = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+
+        if (!MODEL) {
+          // The launcher writes runtime.json from the last-used model. Until
+          // one has been chosen there is nothing to talk to, and saying so is
+          // better than a request that fails with a server error.
+          showBanner('No model chosen yet. In Termux run '
+            + '`momos chat <model>` once, then reload this page.');
+          sendBtn.disabled = true;
+          setStatus('no model');
+          return;
+        }
+
+        // Shown before the first turn so it is clear which model is answering.
+        setStatus(MODEL);
+        autosize();
+        input.focus();
+      }
+
+      function showBanner(text) {
+        banner.textContent = text;
+        banner.hidden = false;
+      }
+
+      // runtime.json is written beside this page by `momos ui`, so it is a
+      // same-origin request and works with no server of its own.
+      fetch('runtime.json', { cache: 'no-store' })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .catch(function () { return null; })
+        .then(init);
     })();
   </script>
 </body>
