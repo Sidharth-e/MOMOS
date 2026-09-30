@@ -21,6 +21,34 @@ SETUP_SH="$REPO_ROOT/scripts/setup.sh"
 LEGACY_SH="$REPO_ROOT/scripts/legacy/proot/momos.sh"
 UI_HTML="$REPO_ROOT/scripts/ui/index.html"
 
+# Resolved before any case narrows PATH to stubs of its own. Case scripts that
+# background a process need a sleep that really yields, so the background stub
+# gets scheduled before the poll waiting on it gives up — but only for a moment,
+# since the launcher's own waits run to 90 seconds.
+REAL_SLEEP="$(command -v sleep)"
+
+# Wait for a file a backgrounded stub has yet to create. The server is launched
+# with `&`, so a case that reads what the stub wrote has to give it a turn —
+# but only briefly, or a genuine failure would show up as a slow pass.
+wait_for_file() {
+    local file="$1" i=0
+    while [ "$i" -lt 100 ]; do
+        [ -f "$file" ] && return 0
+        "$REAL_SLEEP" 0.05
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# Whether a PID names a process that is really running. `kill -0` is not enough
+# on its own: it also succeeds for a zombie, which is exactly what a killed
+# child of this shell becomes until something reaps it.
+pid_alive() {
+    local state
+    state=$(ps -o state= -p "$1" 2>/dev/null | tr -d ' ')
+    [ -n "$state" ] && [ "${state#Z}" = "$state" ]
+}
+
 PASS=0
 FAIL=0
 
@@ -744,33 +772,66 @@ section "launcher — momos serve --lan"
 #
 # lan_ip and lan_reachable are stubbed rather than extracted — the address and
 # the reachability probe are inputs to the decision, not the decision. The
-# ollama stub prints the environment it was handed, which is the only way to
-# assert on an export that exists solely for the lifetime of that one command.
+# ollama stub is what makes the bind observable: the export lives only for the
+# lifetime of that one command, so it is recorded from inside the process.
+#
+# The server is backgrounded now, so `up` is modelled as a marker file the stub
+# raises rather than a fixed answer. That is what lets one case say "down before
+# this command ran, up after" — the thing a fixed stub cannot express, and the
+# only way to test that the command waits for the server it started.
 serve_case() {
-    local args="$1" up="$2" ip="$3" reachable="$4" tmp
+    local args="$1" up="$2" ip="$3" reachable="$4" start_fails="${5:-0}" tmp
     tmp=$(mktemp -d)
     mkdir -p "$tmp/home/.momos"
 
-    cat > "$tmp/ollama" <<'STUB'
+    # The marker is raised last, and the environment is written to a file of its
+    # own rather than to stdout. Reading it back after wait_for_server has
+    # returned is then ordered rather than a race: the poll can only succeed
+    # once the file it is about to be compared against is complete.
+    cat > "$tmp/ollama" <<STUB
 #!/bin/bash
-echo "OLLAMA_HOST=${OLLAMA_HOST:-<unset>}"
-echo "OLLAMA_ORIGINS=${OLLAMA_ORIGINS:-<unset>}"
-echo "OLLAMA_INVOKED=1"
+{
+    echo "OLLAMA_HOST=\${OLLAMA_HOST:-<unset>}"
+    echo "OLLAMA_ORIGINS=\${OLLAMA_ORIGINS:-<unset>}"
+    echo "OLLAMA_INVOKED=1"
+} > "$tmp/env"
+if [ "$start_fails" = "0" ]; then
+    touch "$tmp/up"
+fi
 STUB
     chmod +x "$tmp/ollama"
+
+    # Shortened, not stubbed away: wait_for_server polls every second for up to
+    # 90, and a sleep that returns instantly would exhaust the whole poll before
+    # the background stub ever got scheduled.
+    cat > "$tmp/sleep" <<STUB
+#!/bin/bash
+exec "$REAL_SLEEP" 0.01
+STUB
+    chmod +x "$tmp/sleep"
+
+    if [ "$up" -eq 0 ]; then
+        touch "$tmp/up"
+    fi
 
     {
         echo 'set -euo pipefail'
         echo "LOG_DIR='$tmp/home/.momos'"
         echo 'STATE_FILE=$LOG_DIR/state'
+        echo 'SERVER_LOG=$LOG_DIR/server.log'
         echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_LOG=$LOG_DIR/ui.log'
+        echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
         echo 'UI_VERSION="2"'
         echo 'OLLAMA_URL="http://127.0.0.1:11434"'
         echo 'MODEL=""'
-        echo "server_up() { return $up; }"
+        echo "server_up() { [ -f '$tmp/up' ]; }"
         echo "lan_ip() { [ -n '$ip' ] || return 1; printf '%s\\n' '$ip'; }"
         echo "lan_reachable() { return $reachable; }"
+        extract_function "$MOMOS_SH" wait_for_server
         extract_function "$MOMOS_SH" print_lan_urls
+        extract_function "$MOMOS_SH" print_local_urls
+        extract_function "$MOMOS_SH" launch_ollama
         extract_function "$MOMOS_SH" cmd_serve
         echo "cmd_serve $args"
     } > "$tmp/run.sh"
@@ -778,6 +839,9 @@ STUB
     PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
     RUN_STATUS=$?
     OUT="$(cat "$tmp/out")"
+    OLLAMA_ENV="$(cat "$tmp/env" 2>/dev/null || true)"
+    LOG_EXISTS=no
+    [ -f "$tmp/home/.momos/server.log" ] && LOG_EXISTS=yes
     rm -rf "$tmp"
 }
 
@@ -788,28 +852,47 @@ STUB
 # It also re-checks the ${1:-} and `|| true` discipline the strict mode needs.
 serve_case '' 1 '192.168.1.42' 0
 if [ "$RUN_STATUS" -eq 0 ] \
-    && grep -qxF 'OLLAMA_HOST=127.0.0.1:11434' <<< "$OUT" \
-    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OUT"; then
-    pass "bare 'serve' pins loopback and sets no origins"
+    && grep -qxF 'OLLAMA_HOST=127.0.0.1:11434' <<< "$OLLAMA_ENV" \
+    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OLLAMA_ENV"; then
+    pass "bare 'serve' starts a background server pinned to loopback"
 else
     fail "bare 'serve' should bind 127.0.0.1 only (status=$RUN_STATUS)"
+    show "$OLLAMA_ENV"
+fi
+
+# Backgrounded means the terminal comes back, and the two things the held-open
+# terminal used to imply — how to stop it, where the output went — have to be
+# printed instead.
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -q 'momos stop' <<< "$OUT" \
+    && grep -q 'server.log' <<< "$OUT" \
+    && ! grep -q 'OLLAMA_HOST=' <<< "$OUT"; then
+    pass "bare 'serve' names the stop command and the log, and prints no server output"
+else
+    fail "a backgrounded server must say how to stop it and where its output went"
     show "$OUT"
+fi
+
+if [ "$LOG_EXISTS" = yes ]; then
+    pass "server output is redirected to the log file, not the terminal"
+else
+    fail "the launcher should redirect ollama into the server log"
 fi
 
 serve_case '--lan' 1 '192.168.1.42' 0
 if [ "$RUN_STATUS" -eq 0 ] \
-    && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OUT" \
-    && grep -qxF 'OLLAMA_ORIGINS=http://192.168.1.42:*' <<< "$OUT"; then
+    && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OLLAMA_ENV" \
+    && grep -qxF 'OLLAMA_ORIGINS=http://192.168.1.42:*' <<< "$OLLAMA_ENV"; then
     pass "'serve --lan' binds all interfaces with the exact-IP origin"
 else
     fail "--lan should export OLLAMA_HOST=0.0.0.0:11434 and the exact-IP origin (status=$RUN_STATUS)"
-    show "$OUT"
+    show "$OLLAMA_ENV"
 fi
 
 # A bare `*` would let any page the user visits drive and delete the phone's
 # models, and a subnet form would accept http://192.168.1.5.evil.com. The
 # exact-IP form is a real control, so it is asserted against explicitly.
-if grep -qxF 'OLLAMA_ORIGINS=*' <<< "$OUT"; then
+if grep -qxF 'OLLAMA_ORIGINS=*' <<< "$OLLAMA_ENV"; then
     fail "the origin must never be a bare '*': any web page could then use the phone"
 else
     pass "the origin is never a bare '*'"
@@ -817,12 +900,39 @@ fi
 
 serve_case '--lan' 1 '' 0
 if [ "$RUN_STATUS" -eq 0 ] \
-    && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OUT" \
-    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OUT" \
-    && grep -qF 'OLLAMA_ORIGINS=' <<< "$OUT"; then
+    && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OLLAMA_ENV" \
+    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OLLAMA_ENV" \
+    && grep -qF 'OLLAMA_ORIGINS=' <<< "$OLLAMA_ENV"; then
     pass "--lan with no detectable address still binds, and prints the override"
 else
     fail "--lan should bind anyway and explain the CORS block (status=$RUN_STATUS)"
+    show "$OLLAMA_ENV"
+fi
+
+# The server answered on loopback, but the reachability probe — the only thing
+# that can tell a 0.0.0.0 bind from a 127.0.0.1 one from inside the phone — did
+# not. Reporting success here would send the user to a laptop that cannot
+# connect, so the command has to fail and say so.
+serve_case '--lan' 1 '192.168.1.42' 1
+if [ "$RUN_STATUS" -ne 0 ] \
+    && ! grep -q 'OpenAI-compatible' <<< "$OUT" \
+    && grep -q 'not reachable' <<< "$OUT"; then
+    pass "--lan refuses to claim exposure when the LAN probe fails"
+else
+    fail "a failed LAN probe must not be reported as exposure (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# A server that never answers is the other half of backgrounding: the command
+# returns, so it cannot leave the user believing a dead server is running.
+serve_case '--lan' 1 '192.168.1.42' 0 1
+if [ "$RUN_STATUS" -ne 0 ] \
+    && grep -q 'did not start' <<< "$OUT" \
+    && grep -q 'server.log' <<< "$OUT" \
+    && ! grep -q 'OpenAI-compatible' <<< "$OUT"; then
+    pass "a server that never answers fails with the log path, not a success message"
+else
+    fail "a failed start must be reported, not assumed to have worked (status=$RUN_STATUS)"
     show "$OUT"
 fi
 
@@ -832,7 +942,7 @@ fi
 serve_case '--lan' 0 '192.168.1.42' 1
 if [ "$RUN_STATUS" -ne 0 ] \
     && grep -q 'momos stop' <<< "$OUT" \
-    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OLLAMA_ENV"; then
     pass "loopback-only server: --lan explains, fails, and does not restart it"
 else
     fail "a private server must not be reported as exposed (status=$RUN_STATUS)"
@@ -844,7 +954,7 @@ fi
 # the server.
 serve_case '--lan' 0 '192.168.1.42' 0
 if [ "$RUN_STATUS" -eq 0 ] \
-    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT" \
+    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OLLAMA_ENV" \
     && grep -q '/v1' <<< "$OUT"; then
     pass "already-exposed server: --lan reports success without restarting"
 else
@@ -853,7 +963,7 @@ else
 fi
 
 serve_case '--lan' 0 '' 0
-if [ "$RUN_STATUS" -ne 0 ] && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+if [ "$RUN_STATUS" -ne 0 ] && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OLLAMA_ENV"; then
     pass "up server with no detectable address refuses to guess"
 else
     fail "should not claim exposure when the address is unknown (status=$RUN_STATUS)"
@@ -861,7 +971,7 @@ else
 fi
 
 serve_case '' 0 '192.168.1.42' 0
-if [ "$RUN_STATUS" -eq 0 ] && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+if [ "$RUN_STATUS" -eq 0 ] && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OLLAMA_ENV"; then
     pass "bare 'serve' over a running server still reports and returns"
 else
     fail "bare 'serve' should keep today's already-running behaviour (status=$RUN_STATUS)"
@@ -875,7 +985,7 @@ for bad in '-lan' '--lans'; do
     if [ "$RUN_STATUS" -ne 0 ] \
         && grep -q "Unknown option: $bad" <<< "$OUT" \
         && grep -q 'Usage: momos serve' <<< "$OUT" \
-        && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+        && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OLLAMA_ENV"; then
         pass "'$bad' rejected with usage instead of starting a private server"
     else
         fail "'$bad' must be rejected, not ignored (status=$RUN_STATUS)"
@@ -886,7 +996,7 @@ done
 serve_case '--lan --foo' 1 '192.168.1.42' 0
 if [ "$RUN_STATUS" -ne 0 ] \
     && grep -q 'Too many arguments' <<< "$OUT" \
-    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OUT"; then
+    && ! grep -q 'OLLAMA_INVOKED=1' <<< "$OLLAMA_ENV"; then
     pass "a second argument is refused rather than half-applied"
 else
     fail "extra arguments should be refused (status=$RUN_STATUS)"
@@ -1134,19 +1244,33 @@ fi
 
 section "launcher — momos ui wiring"
 
-# cmd_ui has to have written runtime.json before serve_ui execs, because exec
-# replaces the process and no later statement ever runs. serve_ui is therefore
-# replaced after extraction — in the real script it execs, which would end this
-# harness. The launcher's own MODEL preamble is reproduced rather than assumed,
-# so what is tested is how the device actually reads its state.
+# cmd_ui has to have written runtime.json before the static server starts: the
+# page fetches that file on load, so a server started first would serve a
+# directory whose model file is not there yet.
+#
+# Backgrounding makes the ordering unreadable from the output — the server no
+# longer runs to completion in front of the harness. The darkhttpd stub
+# snapshots runtime.json the moment it is invoked instead, which is a stronger
+# check than line order anyway: it fails if the file is missing, empty or
+# incomplete at the instant the server starts, not merely out of sequence.
+#
+# The launcher's own MODEL preamble is reproduced rather than assumed, so what
+# is tested is how the device actually reads its state.
 ui_wiring_case() {
-    local model="$1" tmp
+    local model="$1" tmp snapshot
     tmp=$(mktemp -d)
+    snapshot="$tmp/snapshot"
     mkdir -p "$tmp/home/.momos"
 
     if [ -n "$model" ]; then
         printf '%s\n' "$model" > "$tmp/home/.momos/state"
     fi
+
+    cat > "$tmp/darkhttpd" <<STUB
+#!/bin/bash
+cp "$tmp/home/.momos/ui/runtime.json" "$snapshot"
+STUB
+    chmod +x "$tmp/darkhttpd"
 
     {
         echo 'set -euo pipefail'
@@ -1154,6 +1278,8 @@ ui_wiring_case() {
         echo 'STATE_FILE=$LOG_DIR/state'
         echo 'SERVER_LOG=$LOG_DIR/server.log'
         echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_LOG=$LOG_DIR/ui.log'
+        echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
         echo 'UI_VERSION="2"'
         echo 'OLLAMA_URL="http://127.0.0.1:11434"'
         echo 'MODEL=""'
@@ -1163,57 +1289,364 @@ ui_wiring_case() {
         extract_function "$MOMOS_SH" is_number
         extract_function "$MOMOS_SH" valid_port
         extract_function "$MOMOS_SH" write_runtime_json
+        extract_function "$MOMOS_SH" print_ui_urls
+        extract_function "$MOMOS_SH" launch_ui
         extract_function "$MOMOS_SH" cmd_ui
         # Defined after cmd_ui, so these replace the real ones: later wins.
         echo 'ensure_ui_files() { echo "STEP:ensure_ui"; mkdir -p "$UI_DIR"; }'
         echo 'install_httpd() { echo darkhttpd; }'
         echo 'lan_ip() { echo 192.168.1.42; }'
-        echo 'serve_ui() { echo "STEP:serve_ui"; cat "$UI_DIR/runtime.json"; }'
+        echo 'wait_for_ui() { return 0; }'
         echo 'cmd_ui'
     } > "$tmp/run.sh"
 
     MOMOS_UI_NO_OPEN=1 PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
     RUN_STATUS=$?
     OUT="$(cat "$tmp/out")"
+    wait_for_file "$snapshot" || true
+    SNAPSHOT="$(cat "$snapshot" 2>/dev/null || true)"
     rm -rf "$tmp"
 }
 
 ui_wiring_case 'llama3.2:3b'
-ensure_line=$(grep -n 'STEP:ensure_ui' <<< "$OUT" | cut -d: -f1)
-serve_line=$(grep -n 'STEP:serve_ui' <<< "$OUT" | cut -d: -f1)
-json_line=$(grep -n '^{"model"' <<< "$OUT" | cut -d: -f1)
 
-if [ "$RUN_STATUS" -eq 0 ] \
-    && [ -n "$ensure_line" ] && [ -n "$serve_line" ] \
-    && [ "$ensure_line" -lt "$serve_line" ]; then
+if [ "$RUN_STATUS" -eq 0 ] && grep -q 'STEP:ensure_ui' <<< "$OUT"; then
     pass "the page is ensured before the server is started"
 else
-    fail "ordering wrong: ensure=$ensure_line serve=$serve_line (status=$RUN_STATUS)"
+    fail "ensure_ui_files must run before the server (status=$RUN_STATUS)"
     show "$OUT"
 fi
 
-if [ -n "$json_line" ] && [ "$json_line" -gt "$serve_line" ]; then
-    pass "runtime.json is written by the time serve_ui runs"
+if [ "$SNAPSHOT" = '{"model":"llama3.2:3b","ollama_port":11434}' ]; then
+    pass "runtime.json is complete on disk the moment the server starts"
 else
-    fail "runtime.json must exist before serve_ui (json=$json_line, serve=$serve_line)"
-    show "$OUT"
-fi
-
-if grep -qx '{"model":"llama3.2:3b","ollama_port":11434}' <<< "$OUT"; then
-    pass "runtime.json carries the last-used model through to the page"
-else
-    fail "expected the state file's model in runtime.json"
+    fail "runtime.json must exist and hold the model when the server starts"
+    show "snapshot: $SNAPSHOT"
     show "$OUT"
 fi
 
 # The launcher runs under `set -u`, and a first run has no state file at all.
 # An unbound $MODEL here would make `momos ui` fail before serving anything.
 ui_wiring_case ''
-if [ "$RUN_STATUS" -eq 0 ] && grep -qx '{"model":"","ollama_port":11434}' <<< "$OUT"; then
+if [ "$RUN_STATUS" -eq 0 ] && [ "$SNAPSHOT" = '{"model":"","ollama_port":11434}' ]; then
     pass "ui works with no model chosen yet, under set -u"
 else
     fail "an unset model must not abort 'momos ui' (status=$RUN_STATUS)"
+    show "snapshot: $SNAPSHOT"
     show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — momos ui in the background"
+
+# The server has to come back to the prompt and leave something behind that can
+# end it. The darkhttpd stub stays alive so the recorded PID is a real process
+# for `momos ui stop` to test against — an immediately-exiting stub would make
+# every stop case pass for the wrong reason.
+ui_case() {
+    local args="$1" curl_exit="$2" lan="$3" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    # Named for what it claims to be: proc_cmdline reads the command line back
+    # out of the process table, and the identity check is on that text.
+    cat > "$tmp/darkhttpd" <<STUB
+#!/bin/bash
+printf '%s\n' "\$*" > "$tmp/args"
+exec "$REAL_SLEEP" 20
+STUB
+    chmod +x "$tmp/darkhttpd"
+
+    cat > "$tmp/curl" <<STUB
+#!/bin/bash
+exit $curl_exit
+STUB
+    chmod +x "$tmp/curl"
+
+    cat > "$tmp/sleep" <<STUB
+#!/bin/bash
+exec "$REAL_SLEEP" 0.01
+STUB
+    chmod +x "$tmp/sleep"
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'STATE_FILE=$LOG_DIR/state'
+        echo 'SERVER_LOG=$LOG_DIR/server.log'
+        echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_LOG=$LOG_DIR/ui.log'
+        echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
+        echo 'UI_VERSION="2"'
+        echo 'OLLAMA_URL="http://127.0.0.1:11434"'
+        echo 'MODEL=""'
+        extract_function "$MOMOS_SH" is_number
+        extract_function "$MOMOS_SH" valid_port
+        extract_function "$MOMOS_SH" proc_cmdline
+        extract_function "$MOMOS_SH" write_runtime_json
+        extract_function "$MOMOS_SH" ui_up
+        extract_function "$MOMOS_SH" wait_for_ui
+        extract_function "$MOMOS_SH" print_ui_urls
+        extract_function "$MOMOS_SH" launch_ui
+        extract_function "$MOMOS_SH" ui_stop
+        extract_function "$MOMOS_SH" cmd_ui
+        echo 'ensure_ui_files() { mkdir -p "$UI_DIR"; }'
+        echo 'install_httpd() { echo darkhttpd; }'
+        echo "lan_ip() { [ -n '$lan' ] || return 1; printf '%s\\n' '$lan'; }"
+        echo "cmd_ui $args"
+    } > "$tmp/run.sh"
+
+    MOMOS_UI_NO_OPEN=1 PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    UI_PID_FILE_CONTENT="$(cat "$tmp/home/.momos/ui.pid" 2>/dev/null || true)"
+
+    recorded_pid=$(cut -d' ' -f1 <<< "$UI_PID_FILE_CONTENT")
+    recorded_port=$(cut -d' ' -f2 <<< "$UI_PID_FILE_CONTENT")
+
+    UI_PID_ALIVE=no
+    DARKHTTPD_ARGS=""
+    if [ -n "$recorded_pid" ]; then
+        # The stub records its arguments only once it has been scheduled, so
+        # both of these are read after giving it that turn.
+        wait_for_file "$tmp/args" || true
+        DARKHTTPD_ARGS="$(cat "$tmp/args" 2>/dev/null || true)"
+        pid_alive "$recorded_pid" && UI_PID_ALIVE=yes
+
+        # The stub outlives the harness script, so nothing else would end it.
+        kill "$recorded_pid" 2>/dev/null || true
+    fi
+    rm -rf "$tmp"
+}
+
+ui_case '' 0 '192.168.1.42'
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -q 'http://localhost:8080' <<< "$OUT" \
+    && grep -q "http://192.168.1.42:8080" <<< "$OUT"; then
+    pass "'ui' reports both the phone and the network URL and returns"
+else
+    fail "'ui' should come back with the URLs (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# The terminal no longer stays open as the reminder that a server is running,
+# and the log is no longer anywhere on screen unless it is named.
+if grep -q 'momos ui stop' <<< "$OUT" && grep -q 'ui.log' <<< "$OUT"; then
+    pass "'ui' says how to stop it and where its output goes"
+else
+    fail "a backgrounded UI must name its stop command and its log"
+    show "$OUT"
+fi
+
+if grep -q -- '--port 8080' <<< "$DARKHTTPD_ARGS" \
+    && grep -q -- '--addr 0.0.0.0' <<< "$DARKHTTPD_ARGS"; then
+    pass "the static server is launched on the requested port, on all interfaces"
+else
+    fail "darkhttpd should get the port and the 0.0.0.0 bind"
+    show "args: $DARKHTTPD_ARGS"
+fi
+
+# `<pid> <port>`: the port is kept beside the PID so stopping can say what it
+# stopped, rather than leaving the user to work out which server that was.
+if [ -n "$recorded_pid" ] && [ "$recorded_port" = "8080" ] \
+    && [ "$UI_PID_ALIVE" = yes ]; then
+    pass "the PID file records a live process and the port"
+else
+    fail "expected '<pid> 8080' pointing at a live process, got: $UI_PID_FILE_CONTENT (alive=$UI_PID_ALIVE)"
+fi
+
+# A server that never answers must not be reported as running.
+ui_case '' 7 '192.168.1.42'
+if [ "$RUN_STATUS" -ne 0 ] \
+    && grep -q 'did not start' <<< "$OUT" \
+    && grep -q 'ui.log' <<< "$OUT" \
+    && [ -z "$UI_PID_FILE_CONTENT" ]; then
+    pass "a UI server that never answers fails, and its PID file is cleared"
+else
+    fail "a failed UI start must fail and leave no PID file (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+# `momos ui stop` kills whatever PID the file names, so the file going stale is
+# the dangerous case: PIDs are reused, and the phone restarting is enough to
+# leave one pointing at something else entirely. Each mode stands up a real
+# process for the recorded PID to refer to.
+ui_stop_case() {
+    local mode="$1" tmp exe="" pid="" alive=no state=""
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    case "$mode" in
+        # The command line is what the identity check reads, so the fixture is
+        # a real long-lived binary reached under the server's name. It says
+        # "darkhttpd" in its argv from the first instant and keeps saying it,
+        # which is what a real server does.
+        #
+        # A bash stub that exec'd something else would drop the name at that
+        # exec, and the check would then pass or fail on which side of the exec
+        # the harness happened to look — it passed here by winning that race,
+        # not by testing anything.
+        live-server)
+            exe="$tmp/darkhttpd"
+            ;;
+        dead)
+            exe="$tmp/darkhttpd"
+            ;;
+        unrelated)
+            exe="$tmp/some-other-program"
+            ;;
+    esac
+
+    if [ -n "$exe" ]; then
+        ln -s "$REAL_SLEEP" "$exe"
+        "$exe" 20 &
+        pid=$!
+        printf '%s 8080\n' "$pid" > "$tmp/home/.momos/ui.pid"
+
+        if [ "$mode" = dead ]; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    fi
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
+        extract_function "$MOMOS_SH" proc_cmdline
+        extract_function "$MOMOS_SH" ui_stop
+        echo 'ui_stop'
+    } > "$tmp/run.sh"
+
+    PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    PID_FILE_AFTER=no
+    [ -f "$tmp/home/.momos/ui.pid" ] && PID_FILE_AFTER=yes
+
+    if [ -n "$pid" ]; then
+        # Reaped only after the check: `wait` here would block for the full 20
+        # seconds in the case whose whole point is that the process survived.
+        pid_alive "$pid" && alive=yes
+        kill -9 "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    fi
+    VICTIM_ALIVE="$alive"
+    rm -rf "$tmp"
+}
+
+ui_stop_case live-server
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -q 'port 8080' <<< "$OUT" \
+    && [ "$VICTIM_ALIVE" = no ] \
+    && [ "$PID_FILE_AFTER" = no ]; then
+    pass "'ui stop' ends the recorded server, reports the port, and clears the file"
+else
+    fail "a live UI must be stopped and forgotten (status=$RUN_STATUS, alive=$VICTIM_ALIVE)"
+    show "$OUT"
+fi
+
+ui_stop_case none
+if [ "$RUN_STATUS" -eq 0 ] && grep -q 'not running' <<< "$OUT"; then
+    pass "'ui stop' with nothing running says so and succeeds"
+else
+    fail "stopping nothing should be a no-op that succeeds (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+ui_stop_case dead
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -q 'not running' <<< "$OUT" \
+    && [ "$PID_FILE_AFTER" = no ]; then
+    pass "'ui stop' treats a PID file whose process is gone as stale, not an error"
+else
+    fail "a dead process must not be reported as stopped (status=$RUN_STATUS)"
+    show "$OUT"
+fi
+
+# The one that matters: killing this would take out an unrelated process that
+# merely inherited the number.
+ui_stop_case unrelated
+if [ "$RUN_STATUS" -ne 0 ] \
+    && [ "$VICTIM_ALIVE" = yes ] \
+    && grep -q 'not the web UI' <<< "$OUT"; then
+    pass "'ui stop' refuses a PID that is no longer our server, and kills nothing"
+else
+    fail "a reused PID must never be killed (status=$RUN_STATUS, alive=$VICTIM_ALIVE)"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+# Two darkhttpds on one port would just mean the second one fails to bind, and
+# the PID file can only ever track one — so a second `momos ui` reports instead.
+ui_running_case() {
+    local tmp pid
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    cat > "$tmp/darkhttpd" <<STUB
+#!/bin/bash
+printf '%s\n' "\$*" > "$tmp/args"
+exec "$REAL_SLEEP" 20
+STUB
+    cat > "$tmp/curl" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+    chmod +x "$tmp/darkhttpd" "$tmp/curl"
+
+    "$tmp/darkhttpd" &
+    pid=$!
+    printf '%s 8080\n' "$pid" > "$tmp/home/.momos/ui.pid"
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'STATE_FILE=$LOG_DIR/state'
+        echo 'SERVER_LOG=$LOG_DIR/server.log'
+        echo 'UI_DIR=$LOG_DIR/ui'
+        echo 'UI_LOG=$LOG_DIR/ui.log'
+        echo 'UI_PID_FILE=$LOG_DIR/ui.pid'
+        echo 'UI_VERSION="2"'
+        echo 'OLLAMA_URL="http://127.0.0.1:11434"'
+        echo 'MODEL=""'
+        extract_function "$MOMOS_SH" is_number
+        extract_function "$MOMOS_SH" valid_port
+        extract_function "$MOMOS_SH" proc_cmdline
+        extract_function "$MOMOS_SH" ui_up
+        extract_function "$MOMOS_SH" print_ui_urls
+        extract_function "$MOMOS_SH" launch_ui
+        extract_function "$MOMOS_SH" cmd_ui
+        echo 'ensure_ui_files() { mkdir -p "$UI_DIR"; }'
+        echo 'install_httpd() { echo darkhttpd; }'
+        echo "lan_ip() { printf '%s\\n' '192.168.1.42'; }"
+        echo 'cmd_ui'
+    } > "$tmp/run.sh"
+
+    MOMOS_UI_NO_OPEN=1 PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    OUT="$(cat "$tmp/out")"
+    DARKHTTPD_ARGS="$(cat "$tmp/args" 2>/dev/null || true)"
+    # Killed before it is waited on: this stub is still sleeping, and `wait`
+    # first would sit here for the whole 20 seconds.
+    kill -9 "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    rm -rf "$tmp"
+}
+
+ui_running_case
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -q 'already running on port 8080' <<< "$OUT" \
+    && [ -z "$DARKHTTPD_ARGS" ]; then
+    pass "a second 'momos ui' reports the running one instead of starting another"
+else
+    fail "a running UI must be reported, not duplicated (status=$RUN_STATUS)"
+    show "$OUT"
+    show "second launch args: $DARKHTTPD_ARGS"
 fi
 
 # ---------------------------------------------------------------------------

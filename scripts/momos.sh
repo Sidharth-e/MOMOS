@@ -362,6 +362,10 @@ LOG_DIR="$HOME/.momos"
 STATE_FILE="$LOG_DIR/state"
 SERVER_LOG="$LOG_DIR/server.log"
 UI_DIR="$LOG_DIR/ui"
+UI_LOG="$LOG_DIR/ui.log"
+# Holds "<pid> <port>" for the background static server, so `momos ui stop` can
+# both end it and say which port it ended.
+UI_PID_FILE="$LOG_DIR/ui.pid"
 # Keep in step with the `momos-ui:` marker in scripts/ui/index.html. The
 # launcher compares the two and re-fetches the page on a mismatch, so an
 # existing install picks up a new page without a full reinstall. The number is
@@ -391,12 +395,30 @@ wait_for_server() {
     return 1
 }
 
+# Every bind choice goes through here, so the pinning rule lives in one place:
+# OLLAMA_HOST is set on this command only, never inherited. Anyone with it
+# exported in their shell profile would otherwise expose the server without
+# asking for it — `momos serve --lan` is meant to be the only way to do that.
+#
+# OLLAMA_ORIGINS is left unset rather than emptied when there is no origin to
+# pin: an empty value is not the same thing to Ollama as an absent one.
+launch_ollama() {
+    local host="$1" origins="${2:-}"
+
+    if [ -n "$origins" ]; then
+        OLLAMA_HOST="$host" OLLAMA_ORIGINS="$origins" \
+            nohup ollama serve >> "$SERVER_LOG" 2>&1 &
+    else
+        OLLAMA_HOST="$host" nohup ollama serve >> "$SERVER_LOG" 2>&1 &
+    fi
+}
+
 ensure_server() {
     if server_up; then
         return 0
     fi
     echo "Starting Ollama server..."
-    nohup ollama serve >> "$SERVER_LOG" 2>&1 &
+    launch_ollama "127.0.0.1:11434"
     if ! wait_for_server 90; then
         echo "Ollama did not start. Check $SERVER_LOG"
         exit 1
@@ -600,22 +622,107 @@ write_runtime_json() {
     printf '{"model":"%s","ollama_port":11434}\n' "$model" > "$UI_DIR/runtime.json"
 }
 
-# Foreground, so only one extra process is ever running alongside the models.
-serve_ui() {
+# Backgrounded like the model server, so the terminal comes straight back. The
+# PID is recorded with the port so `momos ui stop` can report what it ended.
+launch_ui() {
     local kind="$1" port="$2"
 
     case "$kind" in
         darkhttpd)
-            exec darkhttpd "$UI_DIR" --port "$port" --addr 0.0.0.0
+            nohup darkhttpd "$UI_DIR" --port "$port" --addr 0.0.0.0 \
+                >> "$UI_LOG" 2>&1 &
             ;;
         python3)
-            exec python3 -m http.server "$port" --bind 0.0.0.0 --directory "$UI_DIR"
+            nohup python3 -m http.server "$port" --bind 0.0.0.0 \
+                --directory "$UI_DIR" >> "$UI_LOG" 2>&1 &
             ;;
         *)
             echo "No static file server available."
             return 1
             ;;
     esac
+
+    echo "$! $port" > "$UI_PID_FILE"
+}
+
+# Answers only once the page is actually being served, which is the difference
+# between "darkhttpd was launched" and "you can open it".
+ui_up() {
+    local port="${1:-}"
+    [ -n "$port" ] || return 1
+    curl -fsS --max-time 2 "http://127.0.0.1:${port}/" > /dev/null 2>&1
+}
+
+wait_for_ui() {
+    local port="$1" tries="${2:-30}" i=0
+    while [ "$i" -lt "$tries" ]; do
+        if ui_up "$port"; then
+            return 0
+        fi
+        sleep 1
+        i=$((i+1))
+    done
+    return 1
+}
+
+print_ui_urls() {
+    local port="$1" lan="${2:-}"
+    echo "  Phone:   http://localhost:${port}"
+    if [ -n "$lan" ]; then
+        echo "  Network: http://${lan}:${port}   <- open this on your laptop"
+    else
+        echo "  Network: http://<phone-ip>:${port}   (could not detect this phone's address)"
+    fi
+}
+
+# The command line of a PID, for the identity check below. procfs is always
+# there in Termux, so the fallback is for anywhere else this is run — and it is
+# why the check can be tested off-device rather than only on a phone.
+proc_cmdline() {
+    local pid="$1"
+
+    if [ -r "/proc/$pid/cmdline" ]; then
+        tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+        return
+    fi
+
+    ps -o args= -p "$pid" 2>/dev/null || true
+}
+
+# A PID file outlives the process it names, and PIDs get reused. Killing on the
+# number alone would let a stale file take out whatever holds that PID now, so
+# the command line is checked first.
+ui_stop() {
+    local pid="" port="" cmdline=""
+
+    if [ -f "$UI_PID_FILE" ]; then
+        read -r pid port < "$UI_PID_FILE" || true
+    fi
+
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$UI_PID_FILE"
+        echo "The web UI is not running."
+        return 0
+    fi
+
+    cmdline=$(proc_cmdline "$pid")
+    case "$cmdline" in
+        *darkhttpd*|*http.server*) ;;
+        *)
+            rm -f "$UI_PID_FILE"
+            echo "PID $pid is not the web UI any more — leaving it alone."
+            return 1
+            ;;
+    esac
+
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+
+    rm -f "$UI_PID_FILE"
+    echo "Web UI stopped${port:+ (port $port)}."
 }
 
 show_help() {
@@ -627,13 +734,14 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  chat [model]          Start chatting (default: last used model)"
-    echo "  ui [port]             Serve the web UI on your network (default port 8080)"
-    echo "  serve [--lan]         Run the Ollama server in the foreground"
-    echo "  stop                  Stop the background server"
+    echo "  ui [port]             Serve the web UI in the background (default port 8080)"
+    echo "  ui stop               Stop the background web UI"
+    echo "  serve [--lan]         Start the Ollama server in the background"
+    echo "  stop                  Stop the background Ollama server"
     echo "  models list           Show all installed models"
     echo "  models pull <name>    Download a new model"
     echo "  models delete <name>  Remove an installed model"
-    echo "  logs                  View live Ollama server logs"
+    echo "  logs                  Follow the server and web UI output"
     echo "  update                Update MOMOS and Ollama"
     echo "  uninstall             Uninstall MOMOS and remove models"
     echo "  help                  Show this help"
@@ -643,8 +751,10 @@ show_help() {
     echo "  momos chat deepseek-r1:1.5b      Chat with a specific model"
     echo "  momos ui                         Serve the web UI on port 8080"
     echo "  momos ui 9000                    Serve it on port 9000 instead"
+    echo "  momos ui stop                    Stop the background web UI"
     echo "  momos serve --lan                Expose Ollama to other devices"
-    echo "  momos stop                       Stop the background server"
+    echo "  momos stop                       Stop the background Ollama server"
+    echo "  momos logs                       Follow the server and web UI output"
     echo "  momos models list                See what's installed"
     echo "  momos models pull qwen2.5:3b     Download Qwen 2.5 3B"
     echo "  momos models delete llama3.2:3b  Remove a model"
@@ -673,6 +783,11 @@ cmd_chat() {
 }
 
 cmd_ui() {
+    if [ "${1:-}" = "stop" ]; then
+        ui_stop
+        return
+    fi
+
     local port="${1:-8080}"
 
     if ! valid_port "$port"; then
@@ -680,14 +795,31 @@ cmd_ui() {
         echo ""
         echo "Usage: momos ui [port]"
         echo "  port must be 1024-65535 (default 8080)"
+        echo "  momos ui stop   stop the background web UI"
         exit 1
+    fi
+
+    # One server at a time: the PID file tracks one, so a second launch would
+    # only fail on the port it is already bound to.
+    local running="" running_port=""
+    if [ -f "$UI_PID_FILE" ]; then
+        read -r running running_port < "$UI_PID_FILE" || true
+        if [ -n "$running" ] && kill -0 "$running" 2>/dev/null \
+            && ui_up "$running_port"; then
+            echo "The web UI is already running on port ${running_port}."
+            echo ""
+            print_ui_urls "$running_port" "$(lan_ip || true)"
+            echo ""
+            echo "  Stop it with: momos ui stop"
+            return 0
+        fi
+        rm -f "$UI_PID_FILE"
     fi
 
     ensure_ui_files
 
-    # The page reads the last-used model from here. Written before install_httpd
-    # and before serve_ui, which execs and never returns, so the file is in place
-    # whichever static server ends up running.
+    # The page reads the last-used model from here. Written before the server
+    # starts, so the file is in place whichever static server ends up running.
     write_runtime_json "$MODEL"
 
     local kind
@@ -699,17 +831,21 @@ cmd_ui() {
     local lan
     lan=$(lan_ip || true)
 
-    echo "MOMOS UI"
-    echo ""
-    echo "  Phone:   http://localhost:${port}"
-    if [ -n "$lan" ]; then
-        echo "  Network: http://${lan}:${port}   <- open this on your laptop"
-    else
-        echo "  Network: http://<phone-ip>:${port}   (could not detect this phone's address)"
+    launch_ui "$kind" "$port"
+
+    if ! wait_for_ui "$port"; then
+        rm -f "$UI_PID_FILE"
+        echo "The web UI did not start. Check $UI_LOG"
+        exit 1
     fi
+
+    echo "MOMOS UI — running in the background"
+    echo ""
+    print_ui_urls "$port" "$lan"
     echo ""
     echo "  Anyone on your Wi-Fi can reach this page — it has no login."
-    echo "  Ctrl+C to stop."
+    echo "  All output: $UI_LOG   (momos logs)"
+    echo "  Stop it with: momos ui stop"
     echo ""
 
     # Skip the browser when there is no browser to open: termux-open-url is
@@ -717,11 +853,12 @@ cmd_ui() {
     if [ -z "${MOMOS_UI_NO_OPEN:-}" ] && command -v termux-open-url > /dev/null 2>&1; then
         termux-open-url "http://localhost:${port}" > /dev/null 2>&1 || true
     fi
-
-    serve_ui "$kind" "$port"
 }
 
-# Printed before the server starts so the URLs stay on screen while it runs.
+# Printed once the server is confirmed up. The server outlives this command, so
+# the block has to carry the two things the terminal used to imply by staying
+# open: how to stop it, and where its output went.
+#
 # Bare echo: the launcher has no colour helpers, those belong to the installer,
 # which is long gone by the time this runs.
 print_lan_urls() {
@@ -729,12 +866,28 @@ print_lan_urls() {
     echo "  Ollama:            http://${ip}:11434"
     echo "  OpenAI-compatible: http://${ip}:11434/v1"
     echo "                     (any non-empty key; the server ignores it)"
-    echo "  Chat page:         run 'momos ui' in a second Termux session,"
-    echo "                     then open http://${ip}:8080"
+    echo "  Chat page:         run 'momos ui' in this session, then open"
+    echo "                     http://${ip}:8080"
     echo ""
     echo "  No login: anyone on your Wi-Fi can reach these, and the API is not"
     echo "  read-only — they can list, pull and delete your models."
-    echo "  Generating is CPU-heavy; the phone will slow down. Ctrl+C to stop."
+    echo "  Generating is CPU-heavy; the phone will slow down."
+    echo ""
+    echo "  All output: $SERVER_LOG   (momos logs)"
+    echo "  Stop it with: momos stop"
+    echo ""
+}
+
+# The private counterpart to print_lan_urls, for the bind nobody else can reach.
+print_local_urls() {
+    echo "  Ollama:            http://localhost:11434"
+    echo "  OpenAI-compatible: http://localhost:11434/v1"
+    echo "                     (any non-empty key; the server ignores it)"
+    echo ""
+    echo "  Reachable from this phone only. For your Wi-Fi: momos serve --lan"
+    echo ""
+    echo "  All output: $SERVER_LOG   (momos logs)"
+    echo "  Stop it with: momos stop"
     echo ""
 }
 
@@ -799,16 +952,17 @@ cmd_serve() {
     fi
 
     if [ "$lan_mode" -eq 0 ]; then
-        echo "Starting Ollama server in the foreground (Ctrl+C to stop)..."
+        echo "Starting Ollama server in the background..."
+        launch_ollama "127.0.0.1:11434"
+        if ! wait_for_server 90; then
+            echo "Ollama did not start. Check $SERVER_LOG"
+            exit 1
+        fi
+        echo "Ollama is running."
         echo ""
-        # Pinned rather than inherited: anyone with OLLAMA_HOST exported in their
-        # shell profile would otherwise expose the server without asking for it.
-        OLLAMA_HOST=127.0.0.1:11434 ollama serve
+        print_local_urls
         return
     fi
-
-    echo "Starting Ollama server, exposed to your Wi-Fi (Ctrl+C to stop)..."
-    echo ""
 
     ip=$(lan_ip || true)
     if [ -z "$ip" ]; then
@@ -822,17 +976,45 @@ cmd_serve() {
         echo ""
         echo "  OLLAMA_HOST=0.0.0.0 OLLAMA_ORIGINS='http://<phone-ip>:*' ollama serve"
         echo ""
-        OLLAMA_HOST=0.0.0.0:11434 ollama serve
+        launch_ollama "0.0.0.0:11434"
+        if ! wait_for_server 90; then
+            echo "Ollama did not start. Check $SERVER_LOG"
+            exit 1
+        fi
+        echo "Ollama is running, exposed but with browser access blocked."
+        echo ""
+        echo "  All output: $SERVER_LOG   (momos logs)"
+        echo "  Stop it with: momos stop"
+        echo ""
         return
     fi
 
-    print_lan_urls "$ip"
+    echo "Starting Ollama server, exposed to your Wi-Fi..."
     # The exact-IP form, never a subnet wildcard. Origins containing `*` match as
     # prefix+suffix, so `http://192.168.1.*` would also accept a hostile origin
     # such as http://192.168.1.5.evil.com, while `http://<ip>:*` pins the host
     # exactly and leaves the port free — which is what the page needs, since
     # `momos ui` can be given any port.
-    OLLAMA_HOST=0.0.0.0:11434 OLLAMA_ORIGINS="http://${ip}:*" ollama serve
+    launch_ollama "0.0.0.0:11434" "http://${ip}:*"
+
+    if ! wait_for_server 90; then
+        echo "Ollama did not start. Check $SERVER_LOG"
+        exit 1
+    fi
+
+    # The API answering on loopback only proves it started, not that the LAN
+    # bind took effect. Without this second probe a failed bind would be
+    # reported as exposure, which is the one answer this command must never
+    # get wrong.
+    if ! lan_reachable "$ip"; then
+        echo "Ollama started but is not reachable on ${ip}."
+        echo "Check $SERVER_LOG, then try: momos stop && momos serve --lan"
+        exit 1
+    fi
+
+    echo "Ollama is running and exposed to your Wi-Fi."
+    echo ""
+    print_lan_urls "$ip"
 }
 
 cmd_stop() {
@@ -892,17 +1074,32 @@ cmd_models() {
     esac
 }
 
+# One place to watch both background servers. `tail -f` with several files
+# prints a `==> file <==` header whenever the output switches, so a line from
+# the web server is never mistaken for one from Ollama. The file that does not
+# exist yet is simply left out rather than passed to tail, which would error on
+# it; whichever server is started later creates its log for the next run.
 cmd_logs() {
-    if [ ! -f "$SERVER_LOG" ]; then
-        echo "No server log yet at $SERVER_LOG"
+    local f
+    set --
+    for f in "$SERVER_LOG" "$UI_LOG"; do
+        if [ -f "$f" ]; then
+            set -- "$@" "$f"
+        fi
+    done
+
+    if [ "$#" -eq 0 ]; then
+        echo "No logs yet in $LOG_DIR"
         echo ""
-        echo "Start the server first:"
+        echo "Start a server first:"
         echo "  momos serve"
+        echo "  momos ui"
         exit 1
     fi
-    echo "Following $SERVER_LOG (Ctrl+C to stop)..."
+
+    echo "Following server output (Ctrl+C to stop)..."
     echo ""
-    tail -f "$SERVER_LOG"
+    tail -f "$@"
 }
 
 cmd_update() {
@@ -926,6 +1123,11 @@ cmd_uninstall() {
         [yY]|[yY][eE][sS])
             echo "Stopping Ollama server..."
             pkill -f "ollama serve" 2>/dev/null || true
+
+            # Before its directory goes: a backgrounded darkhttpd would other-
+            # wise keep serving a page that no longer exists, with nothing left
+            # on the phone that knows how to stop it.
+            ui_stop > /dev/null 2>&1 || true
 
             echo "Removing Ollama..."
             pkg uninstall -y ollama 2>/dev/null || true
@@ -1055,13 +1257,15 @@ finish() {
     echo -e "    ${CYAN}momos models delete <name>${NC} ${DIM}remove a model${NC}"
     echo ""
     echo -e "  ${WHITE}Web UI:${NC}"
-    echo -e "    ${CYAN}momos ui${NC}                  ${DIM}serve the UI to your network${NC}"
+    echo -e "    ${CYAN}momos ui${NC}                  ${DIM}serve the UI in the background${NC}"
     echo -e "    ${CYAN}momos ui 9000${NC}             ${DIM}serve it on another port${NC}"
+    echo -e "    ${CYAN}momos ui stop${NC}             ${DIM}stop the background web UI${NC}"
     echo ""
     echo -e "  ${WHITE}Server:${NC}"
-    echo -e "    ${CYAN}momos serve${NC}                ${DIM}run the server in the foreground${NC}"
+    echo -e "    ${CYAN}momos serve${NC}                ${DIM}start the server in the background${NC}"
+    echo -e "    ${CYAN}momos serve --lan${NC}          ${DIM}and expose it to your Wi-Fi${NC}"
     echo -e "    ${CYAN}momos stop${NC}                 ${DIM}stop the background server${NC}"
-    echo -e "    ${CYAN}momos logs${NC}                 ${DIM}view live server logs${NC}"
+    echo -e "    ${CYAN}momos logs${NC}                 ${DIM}follow the server and UI output${NC}"
     echo ""
     echo -e "  ${WHITE}Maintenance:${NC}"
     echo -e "    ${CYAN}momos update${NC}               ${DIM}update MOMOS and Ollama${NC}"
@@ -1080,6 +1284,12 @@ uninstall_momos() {
         [yY]|[yY][eE][sS])
             info "Stopping Ollama server..."
             pkill -f "ollama serve" 2>/dev/null || true
+
+            # The UI server is backgrounded, so nothing else would end it and it
+            # would go on serving a page the next step deletes. Matched on the
+            # directory it serves, which is what makes it ours.
+            info "Stopping web UI..."
+            pkill -f "$UI_DIR" 2>/dev/null || true
 
             info "Removing Ollama..."
             pkg uninstall -y ollama 2>/dev/null || true

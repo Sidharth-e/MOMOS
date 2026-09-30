@@ -75,7 +75,7 @@ momos models delete llama3.2:3b  # Remove a model
 
 ### Server Logs
 ```bash
-momos logs                       # View live Ollama server output (Ctrl+C to exit)
+momos logs                       # Follow the server and web UI output (Ctrl+C to exit)
 ```
 
 ![Ollama server logs](assets/ollama-server.png)
@@ -84,10 +84,20 @@ momos logs                       # View live Ollama server output (Ctrl+C to exi
 > The Ollama server starts automatically in the background when running `momos chat` or managing models, and it starts **on the phone only**. You only need `momos logs` if you want to inspect server output directly.
 
 ```bash
-momos serve                      # Run the server in the foreground, on the phone only
-momos serve --lan                # Run it exposed to your Wi-Fi
+momos serve                      # Start the server in the background, on the phone only
+momos serve --lan                # Start it exposed to your Wi-Fi
 momos stop                       # Stop the background server
 ```
+
+Both `momos serve` and `momos ui` hand the terminal straight back and keep
+running. Their output goes to `~/.momos/server.log` and `~/.momos/ui.log`, which
+`momos logs` follows together — `tail` labels each line with the file it came
+from, so the two are never mixed up.
+
+> [!TIP]
+> A backgrounded server stops when Android puts Termux to sleep. Run
+> `termux-wake-lock` first if you are leaving the phone alone — see
+> [Keeping Termux alive in background](#keeping-termux-alive-in-background).
 
 `momos chat` and `momos models` start the server for you on `127.0.0.1` and leave it running. That is deliberately private: nothing on your network can reach it. `momos serve --lan` is the only way to change that.
 
@@ -105,7 +115,14 @@ This rebinds Ollama to all interfaces and tells it which browser origins to acce
                      (any non-empty key; the server ignores it)
 ```
 
-Run it in one Termux session and `momos ui` in a second, and the phone and anything else on your Wi-Fi can both chat with the same model.
+It returns to the prompt once the server answers, so `momos ui` can be started
+from the same session afterwards, and the phone and anything else on your Wi-Fi
+can both chat with the same model.
+
+The command only reports success after it has confirmed the server is really
+reachable on the phone's Wi-Fi address. A `127.0.0.1` server looks identical to
+an exposed one from inside the phone, so a bind that quietly failed would
+otherwise be announced as exposure.
 
 **OpenAI-compatible API**
 
@@ -120,7 +137,7 @@ curl http://192.168.1.42:11434/v1/chat/completions \
 Some clients insist on an API key. Ollama requires a non-empty one and then ignores it, so any string will do — `ollama` is the conventional choice.
 
 > [!WARNING]
-> **There is no authentication.** Anyone on your Wi-Fi who has the address gets the whole API, not just chat — they can list, pull and **delete** your models. The origin check stops other *websites* from reaching your phone; it does nothing about `curl`. Use `--lan` only on a network you trust, and press Ctrl+C when you are done.
+> **There is no authentication.** Anyone on your Wi-Fi who has the address gets the whole API, not just chat — they can list, pull and **delete** your models. The origin check stops other *websites* from reaching your phone; it does nothing about `curl`. Use `--lan` only on a network you trust, and run `momos stop` when you are done.
 
 > [!NOTE]
 > Exposure is not remembered. A server started later by `momos chat` or `momos models` comes back private, and so does one after a reboot — re-run `momos serve --lan`. If you run it while a private server is already up, it says so rather than appearing to succeed: the bind only changes on a restart, so it tells you to `momos stop` first.
@@ -133,13 +150,14 @@ Some clients insist on an API key. Ollama requires a non-empty one and then igno
 ```bash
 momos ui                         # Serve on port 8080
 momos ui 9000                    # Serve on a different port
+momos ui stop                    # Stop the background web server
 ```
 
 The UI is served to your Wi-Fi, so you can open it from a laptop at the network
 address it prints:
 
 ```
-MOMOS UI
+MOMOS UI — running in the background
 
   Phone:   http://localhost:8080
   Network: http://192.168.1.42:8080   <- open this on your laptop
@@ -149,9 +167,13 @@ The page is a chat interface. It talks to whichever model you used last — run 
 
 Opened **on the phone**, it reaches Ollama over loopback and needs nothing else. Opened **from a laptop**, it needs `momos serve --lan` running too.
 
+Running `momos ui` again while it is already serving reports the running one
+rather than starting a second. `momos stop` does not stop it — the web server
+has its own lifecycle, and `momos ui stop` is what ends it.
+
 > [!WARNING]
 > The port has no authentication — anyone on your Wi-Fi who has the address can
-> open the page. Stop it with Ctrl+C when you are done.
+> open the page. Stop it with `momos ui stop` when you are done.
 
 > [!IMPORTANT]
 > Both the page and the `--lan` flag ship with the installer, so an existing
