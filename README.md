@@ -164,6 +164,11 @@ MOMOS UI — running in the background
 ```
 
 The page is a chat interface with a model picker and a list of saved chats.
+Replies are rendered as Markdown — headings, lists, tables, and fenced code with
+the language named — by a small parser written into the page, since fetching one
+over the network would be the one thing on it that fails when the phone is
+offline. It covers what a small model actually writes and shows anything else as
+plain text rather than guessing.
 
 The picker offers everything `momos models` would list, and each chat keeps the
 model it was using — so a DeepSeek R1 reasoning thread and a small quick model

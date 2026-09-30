@@ -5,14 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="robots" content="noindex">
-<!-- momos-ui:3 -->
+<!-- momos-ui:4 -->
 <title>MOMOS — web ui</title>
 <!--
   The chat page for `momos ui`.
 
   Deliberately self-contained: no external stylesheet, font or script. It is
   served off a phone that may have no network of its own, so anything fetched
-  from a CDN would be the one thing on the page that fails.
+  from a CDN would be the one thing on the page that fails. That is also why
+  the Markdown renderer below is hand-written rather than a library.
 
   The server it talks to is Ollama on this same device, reached at the address
   this browser actually dialled. That is the whole trick: open the page on the
@@ -26,6 +27,19 @@
   laptop's chats and the phone's chats are separate, and clearing site data
   clears them — which is what the notice on the page says.
 
+  Two blocks in here are lifted out and run under node by the test suite, and
+  the markers around them are what the tests look for. Everything between
+  `--- store:begin ---` and `--- store:end ---` must stay free of the DOM, and
+  everything between `--- markdown:begin ---` and `--- markdown:end ---` must
+  build through the element factory it is handed rather than a global. Move a
+  marker and the test that reads it finds an empty block.
+
+  The page is drawn as one full-height app: a rail of chats on the left and a
+  column of conversation on the right, each scrolling on its own. Monospace and
+  the phosphor palette carry the chrome — the rail, the chrome, the code — and
+  message prose is set in the system sans, because a paragraph of monospace is
+  the one thing on this page that is genuinely hard to read.
+
   The `momos-ui:` marker above is a version stamp. The launcher and installer
   look for it to decide whether the copy on the device is current, so it must
   stay, and its number must match UI_VERSION in scripts/momos.sh.
@@ -33,204 +47,108 @@
 <style>
   :root {
     --paper:     #070b0e;  /* unlit tube */
+    --rail:      #090e12;  /* the sidebar, a shade behind the page */
     --panel:     #0c1317;
+    --code:      #05090b;
     --line:      #1e2c31;
     --text:      #c6d4d2;
     --muted:     #7d8e92;  /* the DIM attribute */
+    --faint:     #5c6c70;  /* the rail's second line */
     --phosphor:  #6fe3d2;  /* ANSI cyan */
     --amber:     #e8b75c;  /* ANSI yellow, used once */
 
+    /* Two families, deliberately different: the mono is the machine talking —
+       the rail, the chrome, code, your own words — and the sans is the part
+       you actually read. Neither is fetched; both are whatever the device
+       already has, which is the only honest choice offline. */
     --mono: ui-monospace, "SF Mono", "Roboto Mono", "DejaVu Sans Mono",
             Menlo, Consolas, "Liberation Mono", monospace;
+    --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+             "Helvetica Neue", Arial, sans-serif;
 
-    --step-0: 0.8125rem;
-    --step-1: 0.9375rem;
-    --step-2: clamp(1.75rem, 9vw, 2.75rem);
+    --t-xs:   0.72rem;   /* rail metadata */
+    --t-sm:   0.8rem;    /* chrome: buttons, status, notices */
+    --t-md:   0.9375rem; /* prose */
+    --t-code: 0.82rem;
 
-    /* The chat-list column. The breakpoint where it appears is written out in
-       the media queries below instead, because a condition cannot read a
-       custom property. It is 55rem and not less: the two columns, the gap
-       between them and the page's own padding come to about that much, and
-       below it the conversation would be squeezed under its measure. */
-    --list-col: 16rem;
+    --rail-col: 15rem;
+    /* Under 80 characters, and a shade under the 68ch a proportional face
+       wants, because this column also has to hold code and tables. */
+    --measure: 66ch;
   }
 
   *, *::before, *::after { box-sizing: border-box; }
 
+  html, body { height: 100%; }
+
   body {
     margin: 0;
-    /* Top-aligned rather than centred: a conversation grows downward, and a
-       vertically centred column would drift as replies arrive. */
-    padding: clamp(1.5rem, 6vw, 4rem) 16px;
-    min-height: 100vh;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
     background: var(--paper);
     color: var(--text);
-    font-family: var(--mono);
-    font-size: var(--step-1);
+    font-family: var(--prose);
+    font-size: var(--t-md);
     line-height: 1.6;
     -webkit-text-size-adjust: 100%;
+    /* The two panes scroll, not the page. A chat that scrolls the whole window
+       takes the composer off the bottom of the screen with it. */
+    overflow: hidden;
   }
 
-  .shell {
-    width: 100%;
-    max-width: 62ch;
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    display: grid;
+    grid-template-columns: var(--rail-col) minmax(0, 1fr);
   }
 
-  /* Two columns once there is room for both without squeezing the conversation
-     below the measure it was written for. The list is pinned so a long reply
-     scrolls under it rather than carrying it off the screen. */
-  @media (min-width: 55rem) {
-    .shell {
-      display: grid;
-      grid-template-columns: var(--list-col) minmax(0, 62ch);
-      gap: 1.5rem;
-      max-width: calc(var(--list-col) + 1.5rem + 62ch);
-      align-items: start;
-    }
+  /* ---------------------------------------------------------------------
+     The rail: everything you can switch to.
+     --------------------------------------------------------------------- */
 
-    .chats {
-      position: sticky;
-      top: clamp(1.5rem, 6vw, 4rem);
-      margin-bottom: 0;
-    }
-  }
-
-  /* The project's banner, rebuilt as a real box. Terminals have no rounded
-     corners, so neither does this. */
-  .frame {
-    border: 1px solid var(--line);
-    background: var(--panel);
-    padding: clamp(1.25rem, 5vw, 2rem);
-    margin-bottom: 2rem;
-  }
-
-  .wordmark {
-    margin: 0;
-    font-size: var(--step-2);
-    font-weight: 600;
-    letter-spacing: 0.22em;
-    line-height: 1.1;
-    color: var(--phosphor);
-    /* The tracking pushes the last letter off-centre; pull it back. */
-    margin-right: -0.22em;
-  }
-
-  .subtitle {
-    margin: 0.5rem 0 0;
-    font-size: var(--step-1);
-    font-weight: 400;
-    color: var(--muted);
-  }
-
-  /* Which model answers is a property of the conversation, not of the page, so
-     the picker sits with the banner rather than in a settings screen. */
-  .picker {
-    display: flex;
-    align-items: stretch;
-    gap: 0.4rem;
-    margin-top: 1.25rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line);
-  }
-
-  .picker select {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    font-size: var(--step-0);
-    color: var(--text);
-    background: var(--paper);
-    border: 1px solid var(--line);
-    padding: 0.35rem 0.5rem;
-  }
-
-  .picker select:focus { outline: none; border-color: var(--phosphor); }
-
-  .picker select:disabled { color: var(--muted); }
-
-  .icon {
-    flex: none;
-    font: inherit;
-    font-size: var(--step-0);
-    color: var(--phosphor);
-    background: transparent;
-    border: 1px solid var(--line);
-    padding: 0 0.6rem;
-    cursor: pointer;
-  }
-
-  .icon:hover:not(:disabled) { border-color: var(--phosphor); }
-
-  .icon:disabled { color: var(--muted); cursor: default; }
-
-  .notice {
-    margin: 0 0 2rem;
-    padding-left: 0.9rem;
-    border-left: 2px solid var(--amber);
-    font-size: var(--step-0);
-    color: var(--muted);
-    max-width: 54ch;
-    /* Each warning is its own line; they are stacked rather than replaced so a
-       second reason the page is degraded cannot hide the first. */
-    white-space: pre-line;
-  }
-
-  .notice strong {
-    color: var(--amber);
-    font-weight: 600;
-  }
-
-  .notice[hidden] { display: none; }
-
-  /* The chat list. On a phone it is a panel above the conversation, closed
-     until asked for — a drawer would need a backdrop, a z-index and scroll
-     locking, which is a lot of machinery for the one page that must not break. */
   .chats {
-    border: 1px solid var(--line);
-    background: var(--panel);
-    font-size: var(--step-0);
-    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--rail);
+    border-right: 1px solid var(--line);
+    font-family: var(--mono);
   }
 
   .chats-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.45rem 0.5rem 0.45rem 0.6rem;
+    gap: 0.55rem;
+    padding: 0.8rem 0.7rem 0.8rem 0.95rem;
+    border-bottom: 1px solid var(--line);
   }
 
-  .chats.open .chats-head { border-bottom: 1px solid var(--line); }
-
-  .chats-label {
-    display: none;
-    color: var(--muted);
-    letter-spacing: 0.12em;
+  .brand {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.24em;
+    /* The tracking pushes the last letter off-centre; pull it back. */
+    margin-right: -0.24em;
+    color: var(--phosphor);
   }
 
-  .chats-toggle {
-    font: inherit;
-    font-size: var(--step-0);
-    color: var(--muted);
-    background: transparent;
-    border: 0;
-    padding: 0;
-    cursor: pointer;
-    letter-spacing: 0.12em;
+  .chats-count {
+    font-size: var(--t-xs);
+    color: var(--faint);
+    /* Sits against the wordmark rather than floating between the two controls,
+       so it reads as part of the title. */
+    margin-left: -0.3rem;
   }
-
-  .chats-toggle:hover { color: var(--text); }
 
   .chats-new {
+    margin-left: auto;
+    flex: none;
     font: inherit;
-    font-size: var(--step-0);
+    font-size: var(--t-xs);
+    letter-spacing: 0.04em;
     color: var(--phosphor);
     background: transparent;
     border: 1px solid var(--line);
-    padding: 0.15rem 0.5rem;
+    padding: 0.2rem 0.5rem;
     cursor: pointer;
   }
 
@@ -238,27 +156,21 @@
 
   .chats-new:disabled { color: var(--muted); cursor: default; }
 
-  #chats-body { display: none; }
-
-  .chats.open #chats-body { display: block; }
-
-  @media (min-width: 55rem) {
-    .chats-toggle { display: none; }
-    .chats-label { display: inline; }
-    .chats-head { border-bottom: 1px solid var(--line); }
-    /* The panel is always open where there is a column to hold it, so the
-       `.open` class can be set freely without one layout clobbering the other. */
-    #chats-body { display: block; }
+  .chats-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
 
   .chat-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     list-style: none;
     margin: 0;
-    padding: 0.35rem 0;
-    /* A sticky column must not grow taller than the viewport, or the last rows
-       and the composer both become unreachable. */
-    max-height: 55vh;
-    overflow-y: auto;
+    padding: 0.3rem 0;
+    font-size: var(--t-sm);
   }
 
   .chat-row { display: flex; align-items: stretch; }
@@ -269,18 +181,31 @@
     flex: 1;
     min-width: 0;
     font: inherit;
-    font-size: var(--step-0);
+    font-size: var(--t-sm);
     text-align: left;
     color: var(--muted);
     background: transparent;
     border: 0;
-    padding: 0.45rem 0.6rem;
+    padding: 0.4rem 0.6rem 0.45rem 0.95rem;
     cursor: pointer;
+    line-height: 1.4;
     /* A title is one line by construction, so it can be cut with an ellipsis
        rather than wrapping and making the rows uneven heights. */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* The second line of a row — when you last said something in it. It is drawn
+     by the stylesheet from an attribute rather than written into the button,
+     so the button still holds the title and nothing else: the title is what
+     the page tests read back, and what a screen reader announces. */
+  .chat-open[data-when]::after {
+    content: attr(data-when);
+    display: block;
+    font-size: var(--t-xs);
+    letter-spacing: 0.04em;
+    color: var(--faint);
   }
 
   .chat-open:hover:not(:disabled) { color: var(--text); }
@@ -292,7 +217,7 @@
   .chat-del {
     flex: none;
     font: inherit;
-    font-size: var(--step-0);
+    font-size: var(--t-sm);
     color: var(--muted);
     background: transparent;
     border: 0;
@@ -314,46 +239,179 @@
 
   .chats-empty {
     margin: 0;
-    padding: 0.4rem 0.6rem 0.6rem;
-    color: var(--muted);
+    padding: 0.2rem 0.95rem 0.7rem;
+    font-size: var(--t-xs);
+    color: var(--faint);
   }
 
   .chats-empty[hidden] { display: none; }
 
-  /* The conversation. */
-  .log {
-    margin: 0 0 1.5rem;
+  /* The scrim goes with the drawer, and is a sibling so the stylesheet can
+     reach it from the rail's own open state. */
+  .scrim { display: none; }
+
+  /* ---------------------------------------------------------------------
+     The column: the conversation.
+     --------------------------------------------------------------------- */
+
+  .main {
     display: flex;
     flex-direction: column;
-    gap: 1.1rem;
+    min-width: 0;
+    min-height: 0;
   }
 
-  .body {
-    margin: 0;
-    white-space: pre-wrap;
-    /* A long unbroken token — a URL, a hash — must wrap, and this column is
-       only ever as wide as a phone. */
-    overflow-wrap: anywhere;
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    padding: 0.55rem 0.85rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
   }
+
+  .chats-toggle {
+    display: none;
+    flex: none;
+    font: inherit;
+    font-family: var(--mono);
+    font-size: var(--t-sm);
+    line-height: 1;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 0.4rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .chats-toggle:hover { color: var(--text); border-color: var(--phosphor); }
+
+  .chat-title {
+    flex: 1 1 6rem;
+    min-width: 0;
+    margin: 0;
+    font-family: var(--prose);
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.008em;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Sized to the longest model tag rather than to the room left over. A select
+     stretched across half a laptop screen puts its arrow at the far right edge,
+     a hand's width from the name it belongs to. */
+  .model-pick {
+    flex: 0 1 22rem;
+    display: flex;
+    align-items: stretch;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .model-pick select {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-family: var(--mono);
+    font-size: var(--t-xs);
+    color: var(--text);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 0.3rem 0.4rem;
+  }
+
+  .model-pick select:focus { outline: none; border-color: var(--phosphor); }
+
+  .model-pick select:disabled { color: var(--muted); }
+
+  .icon {
+    flex: none;
+    font: inherit;
+    font-family: var(--mono);
+    font-size: var(--t-xs);
+    color: var(--phosphor);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 0 0.55rem;
+    cursor: pointer;
+  }
+
+  .icon:hover:not(:disabled) { border-color: var(--phosphor); }
+
+  .icon:disabled { color: var(--muted); cursor: default; }
+
+  .notice {
+    margin: 0;
+    padding: 0.6rem 0.95rem;
+    border-bottom: 1px solid var(--line);
+    background: rgba(232, 183, 92, 0.06);
+    font-family: var(--mono);
+    font-size: var(--t-xs);
+    line-height: 1.55;
+    color: var(--muted);
+    /* Each warning is its own line; they are stacked rather than replaced so a
+       second reason the page is degraded cannot hide the first. */
+    white-space: pre-line;
+  }
+
+  .notice strong { color: var(--amber); font-weight: 600; }
+
+  .notice[hidden] { display: none; }
+
+  .log-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .log {
+    display: flex;
+    flex-direction: column;
+    gap: 1.3rem;
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 1.6rem 1.1rem 2.2rem;
+  }
+
+  /* Written on one line in the markup precisely so this matches: whitespace
+     inside the element would count as content and the rule would never fire. */
+  .log:empty { padding-top: 0; padding-bottom: 0; }
+
+  .turn { display: block; }
 
   /* A shell prompt for what you typed. Drawn by the stylesheet rather than
-     written into the text, so it can never be selected, copied, or sent to the
-     model as part of your message. */
-  .turn.user .body::before {
+     written into the text, so it can never be sent to the model as part of your
+     message. It is unselectable as well, or selecting your own message to copy
+     it back out would paste the prompt along with it. */
+  .turn.user .md.plain::before {
     content: "> ";
     color: var(--phosphor);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Your words in the mono, the model's in the sans. The asymmetry is the
+     point: one side is a terminal line, the other is something to read. */
+  .turn.user .md.plain {
+    font-family: var(--mono);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   /* The reply, marked with the same left rule the notice uses. */
   .turn.assistant .body {
     border-left: 2px solid var(--line);
-    padding-left: 0.9rem;
+    padding-left: 1rem;
   }
 
-  .body.failed {
-    border-left-color: var(--amber);
-    color: var(--amber);
-  }
+  .body.failed { border-left-color: var(--amber); }
+  .body.failed .md { color: var(--amber); white-space: pre-wrap; }
 
   /* DeepSeek R1 and friends stream their working-out in a separate field. It
      is folded away and dimmed because it is reasoning, not the reply — but it
@@ -362,38 +420,186 @@
      read once, and keeping them would multiply the storage several times over
      for something already scrolled past. */
   .think {
-    margin: 0 0 0.6rem;
-    padding-left: 0.9rem;
+    margin: 0 0 0.7rem;
+    padding-left: 1rem;
     border-left: 2px solid var(--line);
-    font-size: var(--step-0);
+    font-family: var(--mono);
+    font-size: var(--t-xs);
+    line-height: 1.6;
     color: var(--muted);
   }
 
-  .think summary {
-    cursor: pointer;
-    list-style: none;
-  }
+  .think summary { cursor: pointer; list-style: none; }
 
   .think summary::-webkit-details-marker { display: none; }
 
-  .think summary::before { content: "+ "; }
+  .think summary::before { content: "▸ "; }
 
-  .think[open] summary::before { content: "- "; }
+  .think[open] summary::before { content: "▾ "; }
 
   .think pre {
-    margin: 0.4rem 0 0;
+    margin: 0.45rem 0 0;
     font: inherit;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
 
+  /* ---------------------------------------------------------------------
+     What the model wrote back.
+     --------------------------------------------------------------------- */
+
+  .md { overflow-wrap: anywhere; }
+
+  .md > *:first-child { margin-top: 0; }
+
+  .md > *:last-child { margin-bottom: 0; }
+
+  .md p { margin: 0 0 0.85em; }
+
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+    margin: 1.35em 0 0.5em;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.008em;
+    color: #dbe8e6;
+  }
+
+  .md h1 { font-size: 1.25rem; }
+  .md h2 { font-size: 1.12rem; }
+  .md h3 { font-size: 1rem; }
+  .md h4, .md h5, .md h6 { font-size: 0.94rem; color: var(--text); }
+
+  /* Headings the model wrote are structure inside one reply, so they step down
+     from the reply itself rather than competing with the page title above. */
+
+  .md ul, .md ol { margin: 0 0 0.85em; padding-left: 1.35em; }
+
+  .md li { margin: 0.15em 0; }
+
+  .md li > ul, .md li > ol { margin: 0.15em 0; }
+
+  .md li::marker { color: var(--faint); }
+
+  .md-task {
+    list-style: none;
+    /* Pulled back out of the list's padding so the box lines up with the
+       markers of the items around it. */
+    margin-left: -1.35em;
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+  }
+
+  .md-task input {
+    flex: none;
+    margin: 0;
+    accent-color: var(--phosphor);
+  }
+
+  .md blockquote {
+    margin: 0 0 0.85em;
+    padding-left: 1rem;
+    border-left: 2px solid var(--line);
+    color: var(--muted);
+  }
+
+  .md hr {
+    margin: 1.4em 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .md-code {
+    margin: 0 0 1em;
+    padding: 0.7rem 0.85rem;
+    background: var(--code);
+    border: 1px solid var(--line);
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: var(--t-code);
+    line-height: 1.55;
+    color: var(--text);
+    tab-size: 4;
+  }
+
+  .md-code code { font: inherit; white-space: pre; }
+
+  /* The language, likewise drawn from an attribute rather than written into
+     the block — so the code is still only the code, and copying it does not
+     paste the label in among the first line. */
+  .md-code[data-lang]::before {
+    content: attr(data-lang);
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: var(--t-xs);
+    letter-spacing: 0.1em;
+    color: var(--faint);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .md-ic {
+    padding: 0.08em 0.32em;
+    font-family: var(--mono);
+    font-size: 0.86em;
+    color: var(--phosphor);
+    background: var(--code);
+    border: 1px solid var(--line);
+  }
+
+  .md a {
+    color: var(--phosphor);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+  }
+
+  .md strong { font-weight: 600; color: #dbe8e6; }
+
+  .md del { color: var(--muted); }
+
+  .md table {
+    margin: 0 0 1em;
+    border-collapse: collapse;
+    font-size: 0.88em;
+  }
+
+  .md th, .md td {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--line);
+    text-align: left;
+  }
+
+  .md th { background: var(--panel); font-weight: 600; color: #dbe8e6; }
+
+  /* What is on screen before anyone has said anything. It is a sibling of the
+     log, not inside it: the log has to stay empty for the page tests to read
+     a cleared conversation as cleared. */
+  .empty {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 2.6rem 1.1rem 0;
+  }
+
+  .empty[hidden] { display: none; }
+
+  .empty p {
+    margin: 0;
+    max-width: 44ch;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
   .composer {
     display: flex;
     align-items: flex-end;
-    gap: 0.6rem;
-    border: 1px solid var(--line);
+    gap: 0.5rem;
+    width: calc(100% - 2.2rem);
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 0.55rem 0.55rem 0.55rem 0.8rem;
     background: var(--panel);
-    padding: 0.6rem;
+    border: 1px solid var(--line);
   }
 
   /* The box lights up rather than the textarea drawing its own outline, which
@@ -408,35 +614,40 @@
     background: transparent;
     color: var(--text);
     font: inherit;
+    font-size: 0.9rem;
     line-height: 1.5;
     max-height: 40vh;
   }
+
+  .composer textarea::placeholder { color: var(--faint); }
 
   .composer textarea:focus { outline: none; }
 
   .composer button {
     flex: none;
     font: inherit;
+    font-family: var(--mono);
+    font-size: var(--t-xs);
     color: var(--phosphor);
     background: transparent;
     border: 1px solid var(--line);
-    padding: 0.35rem 0.85rem;
+    padding: 0.4rem 0.8rem;
     cursor: pointer;
   }
 
   .composer button:hover:not(:disabled) { border-color: var(--phosphor); }
 
-  .composer button:disabled {
-    color: var(--muted);
-    cursor: default;
-  }
+  .composer button:disabled { color: var(--muted); cursor: default; }
 
   .composer button[hidden] { display: none; }
 
   .status {
-    margin: 0.9rem 0 0;
-    min-height: 1.3em;
-    font-size: var(--step-0);
+    width: calc(100% - 2.2rem);
+    max-width: var(--measure);
+    margin: 0.4rem auto 0.7rem;
+    min-height: 1.2em;
+    font-family: var(--mono);
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 
@@ -452,12 +663,6 @@
     border: 0;
   }
 
-  a {
-    color: var(--phosphor);
-    text-decoration: underline;
-    text-underline-offset: 0.2em;
-  }
-
   :focus-visible {
     outline: 2px solid var(--phosphor);
     outline-offset: 3px;
@@ -465,9 +670,9 @@
 
   .cursor {
     display: inline-block;
-    width: 0.6em;
-    height: 1.05em;
-    margin-left: 0.25em;
+    width: 0.55em;
+    height: 1em;
+    margin-left: 0.2em;
     background: var(--phosphor);
     vertical-align: text-bottom;
     animation: blink 1.15s step-end infinite;
@@ -478,41 +683,78 @@
     61%, 100% { opacity: 0; }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .cursor { animation: none; }
+  /* On a phone the rail is a drawer over the conversation. A drawer, not a
+     panel above it: the list is the thing you switch with, and giving it the
+     top third of a phone screen costs more than it returns. */
+  @media (max-width: 60rem) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+
+    .chats {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 10;
+      width: min(19rem, 84vw);
+      transform: translateX(-100%);
+      transition: transform 0.18s ease;
+    }
+
+    .chats.open { transform: none; }
+
+    .scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 9;
+      background: rgba(0, 0, 0, 0.55);
+    }
+
+    .chats.open + .scrim { display: block; }
+
+    .chats-toggle { display: block; }
+
+    /* The picker takes its own row rather than being squeezed against the
+       title, which on a phone would leave neither of them readable. */
+    .model-pick { flex-basis: 100%; }
   }
 
-  @media (max-width: 30rem) {
-    .frame { margin-bottom: 1.5rem; }
+  @media (prefers-reduced-motion: reduce) {
+    .chats { transition: none; }
+    .cursor { animation: none; }
   }
 </style>
 </head>
 <body>
-  <main class="shell">
-    <!-- First in the document on purpose. On a phone it is the panel above the
-         conversation, and the toggle that opens it sits at the top of the page
-         rather than below the thing it reveals. -->
+  <div class="app">
+    <!-- The rail. On a phone it is the drawer; on anything wider it is the
+         left column and is always there. Either way it is first in the
+         document, so tabbing reaches the list before the conversation. -->
     <nav class="chats" id="chats" aria-label="Saved chats">
       <div class="chats-head">
-        <button type="button" class="chats-toggle" id="chats-toggle"
-                aria-expanded="false" aria-controls="chats-body">chats ▸</button>
-        <span class="chats-label" id="chats-label">chats</span>
+        <span class="brand">MOMOS</span>
+        <span class="chats-count" id="chats-label"></span>
         <button type="button" class="chats-new" id="new-chat">+ new</button>
       </div>
-      <div id="chats-body">
+      <!-- Outside the scrolling list on purpose. Inside it, an empty rail would
+           float the line to the bottom of a tall void, a long way from the
+           heading it belongs to. -->
+      <p class="chats-empty" id="chats-empty">no saved chats</p>
+      <div class="chats-body" id="chats-body">
         <ul class="chat-list" id="chat-list"></ul>
-        <p class="chats-empty" id="chats-empty">no saved chats</p>
       </div>
     </nav>
 
-    <!-- One grid cell holding everything but the list. Without it the frame,
-         the log, the composer and the status line would each be a cell of
-         their own. It carries no styles of its own. -->
-    <div class="column">
-      <header class="frame">
-        <h1 class="wordmark">MOMOS</h1>
-        <p class="subtitle">web ui</p>
-        <div class="picker">
+    <!-- The drawer's backdrop. A sibling of the rail so the sheet can reach it
+         from the rail's own open state, with no script involved. -->
+    <div class="scrim"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button type="button" class="chats-toggle" id="chats-toggle"
+                aria-expanded="false" aria-controls="chats-body"
+                aria-label="Saved chats">☰</button>
+        <h1 class="chat-title" id="chat-title">New chat</h1>
+        <div class="model-pick">
           <label class="sr-only" for="model">Model</label>
           <select id="model"></select>
           <button type="button" class="icon" id="reload-models"
@@ -523,10 +765,18 @@
 
       <p class="notice" id="banner" hidden></p>
 
-      <!-- aria-live is off on the log on purpose. A polite live region over a
-           token-by-token stream reads every fragment aloud, which is unusable.
-           Arrivals and state changes are announced through #status instead. -->
-      <div class="log" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
+      <div class="log-wrap" id="log-wrap">
+        <!-- aria-live is off on the log on purpose. A polite live region over a
+             token-by-token stream reads every fragment aloud, which is
+             unusable. Arrivals and state changes are announced through #status
+             instead. Written as one line so the stylesheet's `:empty` rule can
+             match it. -->
+        <div class="log" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
+
+        <div class="empty" id="empty" hidden>
+          <p>Nothing here yet. Type below to start a chat.</p>
+        </div>
+      </div>
 
       <form class="composer" id="composer" autocomplete="off">
         <label class="sr-only" for="prompt">Message</label>
@@ -537,14 +787,17 @@
       </form>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>
-    </div>
-  </main>
+    </main>
+  </div>
 
   <script>
     (function () {
       'use strict';
 
       var logEl = document.getElementById('log');
+      var wrapEl = document.getElementById('log-wrap');
+      var emptyEl = document.getElementById('empty');
+      var chatTitle = document.getElementById('chat-title');
       var form = document.getElementById('composer');
       var input = document.getElementById('prompt');
       var sendBtn = document.getElementById('send');
@@ -584,18 +837,40 @@
       var MAX_SESSIONS = 50;
       var TITLE_MAX = 40;
 
+      var WHEN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
       function newId() {
         return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
       }
 
       // A conversation's name is the first thing you said in it. Only the first
       // line survives, because a pasted stack trace would otherwise become a
-      // paragraph in a 16rem column.
+      // paragraph in a 15rem column.
       function titleFor(text) {
         var line = String(text == null ? '' : text).split('\n')[0].trim();
         if (!line) return 'untitled';
         if (line.length <= TITLE_MAX) return line;
         return line.slice(0, TITLE_MAX - 1).trim() + '…';
+      }
+
+      // The second line of a row in the rail. `updated` is the store's own
+      // field, which is why the formatter lives here beside it — and why it
+      // takes "now" as an argument rather than reading a clock, so a test can
+      // ask it a question with a fixed answer. Relative rather than absolute
+      // up to a week, because "when did I last talk in this" is a question
+      // about distance, and a date would make you do the subtraction yourself.
+      function whenLabel(updated, now) {
+        if (typeof updated !== 'number' || !isFinite(updated) || updated <= 0) return '';
+        var gap = now - updated;
+        // A clock that moved backwards is the device's business, not a reason
+        // to render "-3h".
+        if (!isFinite(gap) || gap < 60000) return 'now';
+        if (gap < 3600000) return Math.floor(gap / 60000) + 'm';
+        if (gap < 86400000) return Math.floor(gap / 3600000) + 'h';
+        if (gap < 604800000) return Math.floor(gap / 86400000) + 'd';
+        var d = new Date(updated);
+        return d.getDate() + ' ' + WHEN_MONTHS[d.getMonth()];
       }
 
       function isMessage(m) {
@@ -655,23 +930,23 @@
 
         kept = byRecency(kept).slice(0, MAX_SESSIONS);
 
-        var current = null;
+        var currentId = null;
         for (var k = 0; k < kept.length; k++) {
-          if (kept[k].id === data.current) { current = kept[k].id; break; }
+          if (kept[k].id === data.current) { currentId = kept[k].id; break; }
         }
 
-        return { current: current, sessions: kept };
+        return { current: currentId, sessions: kept };
       }
 
       // The exact shape that goes into storage. The list is passed in rather
       // than read off the store so the quota path below can write a shorter
       // list of the same shape.
       function serializeStore(store, sessions) {
-        var current = null;
+        var currentId = null;
         for (var i = 0; i < sessions.length; i++) {
-          if (sessions[i].id === store.current) { current = sessions[i].id; break; }
+          if (sessions[i].id === store.current) { currentId = sessions[i].id; break; }
         }
-        return JSON.stringify({ current: current, sessions: sessions });
+        return JSON.stringify({ current: currentId, sessions: sessions });
       }
 
       // localStorage is small and a phone gets there long before a laptop does.
@@ -716,6 +991,526 @@
         }
       }
       // --- store:end ---
+
+      // --- markdown:begin ---
+      // What the model wrote back, rendered.
+      //
+      // It is hand-written and small because the page ships with no
+      // dependencies and is served off a phone that may have no network at all:
+      // a renderer pulled from a CDN would be the one thing on the page that
+      // fails. It is also, deliberately, not a complete CommonMark — it covers
+      // what a small local model actually emits, and treats everything else as
+      // plain text rather than guessing.
+      //
+      // It builds elements through the `mk` it is handed rather than reaching
+      // for a global. Two things fall out of that. The block stays runnable
+      // outside a browser, which is how tests/test-ui-markdown.sh can drive it
+      // under node. And every piece of model text lands in a text node: nothing
+      // on this page ever parses a string as markup, so the escaping is
+      // structural rather than a regex that has to be right every time.
+      //
+      // `mk` is { createElement: fn(tag), createTextNode: fn(text) }.
+
+      // A link the model wrote is a link the model chose. Only the three
+      // schemes that mean what they say are allowed through; anything else —
+      // javascript:, data:, vbscript: — is shown as text instead of becoming
+      // live. Control characters are stripped first, because "java\nscript:"
+      // is the same scheme to a browser as "javascript:" and a check that reads
+      // the string raw would miss it.
+      function safeHref(url) {
+        var u = String(url == null ? '' : url).replace(/[\u0000- \u007f]+/g, '');
+        if (!u) return null;
+        // Protocol-relative: it is a link to somebody else's server wearing the
+        // page's own scheme, which is not something to hand a model.
+        if (u.charAt(0) === '/' && u.charAt(1) === '/') return null;
+        if (/^https?:\/\//i.test(u)) return u;
+        if (/^mailto:[^\s@]+@[^\s@]+$/i.test(u)) return u;
+        if (/^[#.\/]/.test(u)) return u;
+        return null;
+      }
+
+      // An empty anchor, or null when the scheme was refused. Split from the
+      // labelled one below because a link's text is itself Markdown and has to
+      // be parsed into it, while an autolink's text is just the address.
+      function mdAnchorEl(href, mk) {
+        var safe = safeHref(href);
+        if (!safe) return null;
+        var a = mk.createElement('a');
+        a.setAttribute('href', safe);
+        // The page opened from another tab, and no window.opener handle back
+        // into a page that can reach the model server.
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+        return a;
+      }
+
+      function mdAnchor(href, mk, label) {
+        var a = mdAnchorEl(href, mk);
+        if (a) a.appendChild(mk.createTextNode(label));
+        return a;
+      }
+
+      function mdLeadChars(line) {
+        return /^[ \t]*/.exec(line)[0].length;
+      }
+
+      // Indent in columns, with a tab counted as four, so a list indented with
+      // tabs nests the same way one indented with spaces does.
+      function mdLeadWidth(line) {
+        var s = /^[ \t]*/.exec(line)[0], n = 0, i;
+        for (i = 0; i < s.length; i++) n += (s.charAt(i) === '\t' ? 4 : 1);
+        return n;
+      }
+
+      function mdFence(line) {
+        return /^ {0,3}((?:`{3,})|(?:~{3,}))[ \t]*([^\s`]*)/.exec(line);
+      }
+
+      // A delimiter row: only pipes, colons, dashes and space, and at least one
+      // dash. Checked separately from the alignment pass because a paragraph
+      // like "a - b" must not be mistaken for the head of a table.
+      function mdDelimRow(line) {
+        if (line.indexOf('-') === -1) return false;
+        return /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/.test(line);
+      }
+
+      function mdIsList(line) {
+        return /^ {0,3}([-*+]|\d{1,9}[.)])([ \t]+|$)/.test(line);
+      }
+
+      function mdStartsBlock(lines, i) {
+        var l = lines[i];
+        if (mdFence(l)) return true;
+        if (/^ {0,3}(#{1,6})(?:[ \t]+|$)/.test(l)) return true;
+        if (/^ {0,3}([-*_])[ \t]*(\1[ \t]*){2,}$/.test(l)) return true;
+        if (/^ {0,3}>/.test(l)) return true;
+        if (mdIsList(l)) return true;
+        if (l.indexOf('|') !== -1 && i + 1 < lines.length && mdDelimRow(lines[i + 1])) return true;
+        return false;
+      }
+
+      // A table row, split on pipes that are not backslash-escaped.
+      function mdSplitRow(line) {
+        var s = line.trim(), out = [], cur = '', i, ch;
+        if (s.charAt(0) === '|') s = s.slice(1);
+        if (s.charAt(s.length - 1) === '|') s = s.slice(0, -1);
+        for (i = 0; i < s.length; i++) {
+          ch = s.charAt(i);
+          if (ch === '\\' && i + 1 < s.length) { cur += ch + s.charAt(i + 1); i++; continue; }
+          if (ch === '|') { out.push(cur.trim()); cur = ''; continue; }
+          cur += ch;
+        }
+        out.push(cur.trim());
+        return out;
+      }
+
+      // Only centre and right are reported: left is what a table already does,
+      // so setting it would be noise in the markup.
+      function mdAligns(line) {
+        var cells = mdSplitRow(line), out = [], i, c, l, r;
+        for (i = 0; i < cells.length; i++) {
+          c = cells[i];
+          l = c.charAt(0) === ':';
+          r = c.charAt(c.length - 1) === ':';
+          out.push(l && r ? 'center' : (r ? 'right' : ''));
+        }
+        return out;
+      }
+
+      // [text](target "title"), starting at the bracket. Returns null when this
+      // is not a link at all — an unclosed bracket is just a bracket.
+      function mdLinkAt(s, start) {
+        var depth = 0, close = -1, i, ch, end, d2, c2, dest, tm;
+
+        for (i = start; i < s.length; i++) {
+          ch = s.charAt(i);
+          if (ch === '\\') { i++; continue; }
+          if (ch === '[') depth++;
+          else if (ch === ']') { depth--; if (depth === 0) { close = i; break; } }
+        }
+        if (close === -1) return null;
+        if (s.charAt(close + 1) !== '(') return null;
+
+        end = close + 2;
+        d2 = 1;
+        for (i = close + 2; i < s.length; i++) {
+          c2 = s.charAt(i);
+          if (c2 === '\\') { i++; continue; }
+          if (c2 === '(') d2++;
+          else if (c2 === ')') { d2--; if (d2 === 0) { end = i; break; } }
+        }
+        if (d2 !== 0) return null;
+
+        dest = s.slice(close + 2, end).trim();
+        tm = /^(\S+?)(?:\s+["'(](.*)["')])?$/.exec(dest);
+        if (tm) dest = tm[1];
+        else return null;
+
+        return { text: s.slice(start + 1, close), href: dest, end: end + 1 };
+      }
+
+      function mdInline(text, mk, parent) {
+        var s = String(text == null ? '' : text);
+        var buf = '';
+        var i = 0;
+        var m, run, close, inner, elName, use, want, closeAt, ok, prevCh, nextCh, a;
+
+        function flush() {
+          if (buf) { parent.appendChild(mk.createTextNode(buf)); buf = ''; }
+        }
+
+        while (i < s.length) {
+          var c = s.charAt(i);
+
+          if (c === '\\' && i + 1 < s.length &&
+              /[\\`*_{}\[\]()#+\-.!>~|]/.test(s.charAt(i + 1))) {
+            buf += s.charAt(i + 1);
+            i += 2;
+            continue;
+          }
+
+          // A single newline is a break, not a space. Models write answers line
+          // by line, and a space would run two of those lines together in the
+          // middle of a sentence.
+          if (c === '\n') {
+            flush();
+            parent.appendChild(mk.createElement('br'));
+            i++;
+            continue;
+          }
+
+          if (c === '`') {
+            run = /^`+/.exec(s.slice(i))[0];
+            close = s.indexOf(run, i + run.length);
+            if (close !== -1) {
+              flush();
+              var code = mk.createElement('code');
+              code.className = 'md-ic';
+              code.appendChild(mk.createTextNode(
+                s.slice(i + run.length, close).replace(/^ /, '').replace(/ $/, '')));
+              parent.appendChild(code);
+              i = close + run.length;
+              continue;
+            }
+          }
+
+          // An image is not fetched — a broken-image box on a phone with no
+          // network is worse than a link — so it is rendered as one, labelled
+          // with its own alt text.
+          if (c === '!' && s.charAt(i + 1) === '[') {
+            m = mdLinkAt(s, i + 1);
+            if (m) {
+              flush();
+              a = mdAnchor(m.href, mk, m.text || m.href);
+              if (a) parent.appendChild(a);
+              else buf += s.slice(i, m.end);
+              i = m.end;
+              continue;
+            }
+          }
+
+          if (c === '[') {
+            m = mdLinkAt(s, i);
+            if (m) {
+              flush();
+              a = mdAnchorEl(m.href, mk);
+              if (a) {
+                // The label goes through the inline pass, so **bold** inside a
+                // link is bold and a nested bracket is not a second link.
+                mdInline(m.text, mk, a);
+                parent.appendChild(a);
+              } else {
+                // Refused. The words survive and the address is shown beside
+                // them, so a reader can see what the model tried to do rather
+                // than finding that the sentence quietly lost a clause.
+                mdInline(m.text, mk, parent);
+                buf += ' (' + m.href + ')';
+              }
+              i = m.end;
+              continue;
+            }
+          }
+
+          if (c === '<') {
+            m = /^<((?:https?|mailto):[^<>\s]+)>/.exec(s.slice(i));
+            if (m) {
+              flush();
+              a = mdAnchor(m[1], mk, m[1]);
+              if (a) parent.appendChild(a);
+              else buf += m[0];
+              i += m[0].length;
+              continue;
+            }
+          }
+
+          m = /^(https?:\/\/[^\s<>()\[\]"']+)/.exec(s.slice(i));
+          if (m) {
+            // A full stop at the end of a sentence is not part of the address.
+            var trimmed = m[1].replace(/[.,;:!?]+$/, '');
+            if (trimmed.length > 'https://'.length) {
+              flush();
+              a = mdAnchor(trimmed, mk, trimmed);
+              if (a) {
+                parent.appendChild(a);
+                buf += m[1].slice(trimmed.length);
+                i += m[1].length;
+                continue;
+              }
+            }
+          }
+
+          if (c === '*' || c === '_' || c === '~') {
+            run = /^(\*+|_+|~+)/.exec(s.slice(i))[0];
+            elName = null;
+            use = 0;
+            if (run.length >= 2 && c === '*') { elName = 'strong'; use = 2; }
+            else if (run.length >= 2 && c === '_') { elName = 'strong'; use = 2; }
+            else if (run.length >= 2 && c === '~') { elName = 'del'; use = 2; }
+            else if (run.length === 1 && (c === '*' || c === '_')) { elName = 'em'; use = 1; }
+
+            if (elName) {
+              want = '';
+              for (var w = 0; w < use; w++) want += c;
+              closeAt = s.indexOf(want, i + use);
+              inner = '';
+              ok = closeAt > i + use;
+              // A delimiter touching whitespace is not emphasis: "2 * 3" and
+              // "a * b *" are arithmetic and prose, not markup.
+              if (ok && /\s/.test(s.charAt(i + use))) ok = false;
+              if (ok && /\s/.test(s.charAt(closeAt - 1))) ok = false;
+              // Underscores inside a word are snake_case. This is the single
+              // commonest way a renderer mangles something the model wrote
+              // correctly.
+              if (ok && c === '_') {
+                prevCh = i > 0 ? s.charAt(i - 1) : ' ';
+                nextCh = closeAt + use < s.length ? s.charAt(closeAt + use) : ' ';
+                if (/[A-Za-z0-9_]/.test(prevCh) || /[A-Za-z0-9_]/.test(nextCh)) ok = false;
+              }
+              if (ok) {
+                inner = s.slice(i + use, closeAt);
+                flush();
+                var em = mk.createElement(elName);
+                mdInline(inner, mk, em);
+                parent.appendChild(em);
+                i = closeAt + use;
+                continue;
+              }
+            }
+          }
+
+          buf += c;
+          i++;
+        }
+
+        flush();
+      }
+
+      function mdTable(lines, start, mk, parent) {
+        var head = mdSplitRow(lines[start]);
+        var aligns = mdAligns(lines[start + 1]);
+        var table = mk.createElement('table');
+        var thead = mk.createElement('thead');
+        var htr = mk.createElement('tr');
+        var i, c, th, td, cells, tr, tbody;
+
+        for (c = 0; c < head.length; c++) {
+          th = mk.createElement('th');
+          if (aligns[c]) th.style.textAlign = aligns[c];
+          mdInline(head[c], mk, th);
+          htr.appendChild(th);
+        }
+        thead.appendChild(htr);
+        table.appendChild(thead);
+
+        tbody = mk.createElement('tbody');
+        i = start + 2;
+        while (i < lines.length && lines[i].indexOf('|') !== -1 &&
+               !/^[ \t]*$/.test(lines[i])) {
+          cells = mdSplitRow(lines[i]);
+          tr = mk.createElement('tr');
+          // Rows are padded out to the header's width rather than being allowed
+          // to produce a table that changes shape halfway down.
+          for (c = 0; c < head.length; c++) {
+            td = mk.createElement('td');
+            if (aligns[c]) td.style.textAlign = aligns[c];
+            mdInline(cells[c] === undefined ? '' : cells[c], mk, td);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+          i++;
+        }
+        table.appendChild(tbody);
+        parent.appendChild(table);
+        return i;
+      }
+
+      function mdList(lines, start, mk, parent) {
+        var first = /^ {0,3}([-*+]|\d{1,9}[.)])([ \t]+|$)/.exec(lines[start]);
+        var base = mdLeadWidth(lines[start]);
+        var ordered = /\d/.test(first[1].charAt(0));
+        var list = mk.createElement(ordered ? 'ol' : 'ul');
+        var i = start;
+        var m, ind, text, sub, li, task, box, j;
+
+        if (ordered) {
+          var began = parseInt(first[1], 10);
+          if (began && began !== 1) list.setAttribute('start', String(began));
+        }
+
+        while (i < lines.length) {
+          m = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+|$)([\s\S]*)$/.exec(lines[i]);
+          if (!m) break;
+          ind = mdLeadWidth(lines[i]);
+          if (ind !== base) break;
+          if (/\d/.test(m[2].charAt(0)) !== ordered) break;
+
+          text = m[4];
+          sub = [];
+          i++;
+
+          // Whatever is indented past this item belongs to it — a wrapped line,
+          // or a list of its own. Blank lines are swallowed only when something
+          // indented follows them, so a list does not eat the paragraph after.
+          while (i < lines.length) {
+            if (/^[ \t]*$/.test(lines[i])) {
+              j = i;
+              while (j < lines.length && /^[ \t]*$/.test(lines[j])) j++;
+              if (j < lines.length && mdLeadWidth(lines[j]) > base) {
+                sub.push('');
+                i++;
+                continue;
+              }
+              break;
+            }
+            if (mdLeadWidth(lines[i]) > base) {
+              sub.push(lines[i].slice(Math.min(mdLeadChars(lines[i]), base + 2)));
+              i++;
+              continue;
+            }
+            break;
+          }
+
+          li = mk.createElement('li');
+          task = ordered ? null : /^\[([ xX])\][ \t]+/.exec(text);
+          if (task) {
+            li.className = 'md-task';
+            box = mk.createElement('input');
+            box.setAttribute('type', 'checkbox');
+            box.disabled = true;
+            if (task[1] !== ' ') box.checked = true;
+            li.appendChild(box);
+            mdInline(text.slice(task[0].length), mk, li);
+          } else {
+            mdInline(text, mk, li);
+          }
+          if (sub.length) mdRenderBlocks(sub, mk, li);
+          list.appendChild(li);
+        }
+
+        parent.appendChild(list);
+        return i;
+      }
+
+      function mdRenderBlocks(lines, mk, parent) {
+        var i = 0;
+        var line, fence, run, ch, closeRe, body, head, lvl, htext, h, quoted, bq,
+            para, p, hr;
+
+        while (i < lines.length) {
+          line = lines[i];
+
+          if (/^[ \t]*$/.test(line)) { i++; continue; }
+
+          fence = mdFence(line);
+          if (fence) {
+            run = fence[1];
+            ch = run.charAt(0);
+            body = [];
+            closeRe = new RegExp('^ {0,3}' + (ch === '`' ? '`' : '~') +
+                                 '{' + run.length + ',}[ \\t]*$');
+            i++;
+            // An unterminated fence takes everything left. That is what a reply
+            // mid-stream looks like, and it is also what a model that forgot to
+            // close one means.
+            while (i < lines.length && !closeRe.test(lines[i])) { body.push(lines[i]); i++; }
+            if (i < lines.length) i++;
+            var pre = mk.createElement('pre');
+            pre.className = 'md-code';
+            if (fence[2]) pre.setAttribute('data-lang', fence[2]);
+            var codeEl = mk.createElement('code');
+            codeEl.appendChild(mk.createTextNode(body.join('\n')));
+            pre.appendChild(codeEl);
+            parent.appendChild(pre);
+            continue;
+          }
+
+          head = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/.exec(line);
+          if (head) {
+            lvl = head[1].length;
+            htext = (head[2] || '').replace(/[ \t]+#+[ \t]*$/, '');
+            h = mk.createElement('h' + lvl);
+            mdInline(htext, mk, h);
+            parent.appendChild(h);
+            i++;
+            continue;
+          }
+
+          if (/^ {0,3}([-*_])[ \t]*(\1[ \t]*){2,}$/.test(line)) {
+            hr = mk.createElement('hr');
+            parent.appendChild(hr);
+            i++;
+            continue;
+          }
+
+          if (line.indexOf('|') !== -1 && i + 1 < lines.length && mdDelimRow(lines[i + 1])) {
+            i = mdTable(lines, i, mk, parent);
+            continue;
+          }
+
+          if (/^ {0,3}>/.test(line)) {
+            quoted = [];
+            while (i < lines.length &&
+                   (/^ {0,3}>/.test(lines[i]) ||
+                    (/^[ \t]*$/.test(lines[i]) && i + 1 < lines.length &&
+                     /^ {0,3}>/.test(lines[i + 1])))) {
+              quoted.push(lines[i].replace(/^ {0,3}>[ \t]?/, ''));
+              i++;
+            }
+            bq = mk.createElement('blockquote');
+            mdRenderBlocks(quoted, mk, bq);
+            parent.appendChild(bq);
+            continue;
+          }
+
+          if (mdIsList(line)) {
+            i = mdList(lines, i, mk, parent);
+            continue;
+          }
+
+          // A paragraph. The first line is taken unconditionally so the loop
+          // below always makes progress, whatever the line turns out to be.
+          para = [line];
+          i++;
+          while (i < lines.length && !/^[ \t]*$/.test(lines[i]) &&
+                 !mdStartsBlock(lines, i)) {
+            para.push(lines[i]);
+            i++;
+          }
+          p = mk.createElement('p');
+          mdInline(para.join('\n'), mk, p);
+          parent.appendChild(p);
+        }
+      }
+
+      function mdToDom(text, mk) {
+        var root = mk.createElement('div');
+        var lines = String(text == null ? '' : text)
+          .replace(/\r\n?/g, '\n')
+          .split('\n');
+        mdRenderBlocks(lines, mk, root);
+        return root;
+      }
+      // --- markdown:end ---
 
       var STORE = { current: null, sessions: [] };
 
@@ -777,14 +1572,27 @@
         }
       }
 
-      function scrollToEnd() {
-        var last = logEl.lastElementChild;
-        if (last) last.scrollIntoView({ block: 'end' });
+      // Only follow the reply if you were already at the bottom. Yanking the
+      // view down while somebody is reading back through a long answer is the
+      // thing that makes a chat page feel like it is fighting you.
+      function nearBottom() {
+        var gap = wrapEl.scrollHeight - wrapEl.scrollTop - wrapEl.clientHeight;
+        return !(gap > 80);   // an unmeasurable pane counts as being at the end
       }
 
-      // Text goes in as a text node, never as markup, and there is no Markdown
-      // renderer anywhere on this page. Model output is therefore inserted
-      // literally: no dependency, and no way for a reply to become script.
+      function scrollToEnd(force) {
+        if (!force && !nearBottom()) return;
+        wrapEl.scrollTop = wrapEl.scrollHeight;
+      }
+
+      function clearNode(node) {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      }
+
+      // Text goes in as a text node, never as markup. Model output reaches the
+      // page either through here or through mdToDom, and both of them end in
+      // createTextNode — which is why the renderer being wrong can only produce
+      // the wrong formatting, never a script.
       function appendText(parent, text) {
         parent.appendChild(document.createTextNode(text));
       }
@@ -793,36 +1601,93 @@
         var turn = document.createElement('article');
         turn.className = 'turn ' + role;
 
-        var body = document.createElement('p');
+        var body = document.createElement('div');
         body.className = 'body';
 
-        // Content goes in this span so the generating caret can sit after it.
-        var answer = document.createElement('span');
+        // Everything the turn says lives in here and is replaced wholesale
+        // whenever the Markdown is re-rendered.
+        var answer = document.createElement('div');
+        answer.className = 'md';
+
         body.appendChild(answer);
         turn.appendChild(body);
         logEl.appendChild(turn);
+        renderEmpty();
 
         return {
           turn: turn, body: body, answer: answer,
-          think: null, caret: null, text: '', failed: false
+          think: null, caret: null, caretOn: false, text: '', failed: false
         };
       }
 
       function clearLog() {
         while (logEl.firstChild) logEl.removeChild(logEl.firstChild);
+        renderEmpty();
       }
 
-      function showCaret(t) {
-        if (t.caret) return;
+      // Before anything has been said. It sits outside the log, because the log
+      // has to stay genuinely empty for a cleared conversation to read as one.
+      function renderEmpty() {
+        emptyEl.hidden = logEl.childNodes.length > 0;
+      }
+
+      function renderHead() {
+        var s = activeSession();
+        chatTitle.textContent = s ? (s.title || 'untitled') : 'New chat';
+      }
+
+      // How far into the last block the caret can go before it would land on a
+      // line of its own. A caret after a </p> reads as a new paragraph; a caret
+      // inside one reads as typing.
+      var NO_DESCEND = { HR: 1, TABLE: 1, UL: 1, OL: 1, BLOCKQUOTE: 1 };
+
+      function caretHost(t) {
+        var host = t.answer;
+        var depth = 0;
+        while (depth++ < 6 && host.lastElementChild) {
+          var last = host.lastElementChild;
+          if (NO_DESCEND[last.tagName]) break;
+          host = last;
+        }
+        return host;
+      }
+
+      function paintCaret(t) {
+        if (t.caret && t.caret.parentNode) t.caret.parentNode.removeChild(t.caret);
+        t.caret = null;
+        if (!t.caretOn) return;
         t.caret = document.createElement('span');
         t.caret.className = 'cursor';
         t.caret.setAttribute('aria-hidden', 'true');
-        t.body.appendChild(t.caret);
+        caretHost(t).appendChild(t.caret);
+      }
+
+      // Re-render the whole reply from the text so far. Cheap enough to do on
+      // every chunk: the parser is one linear pass, and a reply is a few
+      // kilobytes. Rebuilding rather than appending is what lets a code fence
+      // that starts mid-stream become a code block as soon as it closes.
+      //
+      // The re-render has to be told where you were first. Emptying a block
+      // shortens the pane, and the browser clamps scrollTop to the shorter
+      // height as it goes — so by the time the new content is in, "are we at
+      // the bottom?" answers itself with the 0 that the rebuild just wrote,
+      // and a reply being followed would stop following it on its first chunk.
+      function paint(t) {
+        var following = nearBottom();
+        clearNode(t.answer);
+        t.answer.appendChild(mdToDom(t.text, document));
+        paintCaret(t);
+        if (following) scrollToEnd(true);
+      }
+
+      function showCaret(t) {
+        t.caretOn = true;
+        paintCaret(t);
       }
 
       function hideCaret(t) {
-        if (t.caret && t.caret.parentNode) t.caret.parentNode.removeChild(t.caret);
-        t.caret = null;
+        t.caretOn = false;
+        paintCaret(t);
       }
 
       // The reasoning fold is created the first time a model actually streams
@@ -866,8 +1731,8 @@
             appendText(thinkingSink(current), obj.message.thinking);
           }
           if (obj.message.content) {
-            appendText(current.answer, obj.message.content);
             current.text += obj.message.content;
+            paint(current);
           }
           scrollToEnd();
         }
@@ -910,11 +1775,11 @@
         hideCaret(current);
         current.failed = true;
         current.text = '';
-        current.answer.textContent = '';
+        current.answer.className = 'md plain';
+        current.answer.textContent = msg;
         current.body.className = 'body failed';
-        current.body.textContent = msg;
         setStatus('failed');
-        scrollToEnd();
+        scrollToEnd(true);
       }
 
       // The NDJSON reader. Ollama sends one JSON object per line and a chunk
@@ -995,7 +1860,9 @@
         session.updated = Date.now();
         if (session.messages.length === 1) session.title = titleFor(text);
 
-        appendText(addTurn('user').answer, text);
+        var yours = addTurn('user');
+        yours.answer.className = 'md plain';
+        yours.answer.textContent = text;
 
         // Saved before the reply is asked for, so a reload in the middle of a
         // long generation keeps the question. It will look unanswered, because
@@ -1008,6 +1875,7 @@
         showCaret(current);
         setGenerating(true);
         setStatus('generating');
+        scrollToEnd(true);
 
         controller = new AbortController();
 
@@ -1051,6 +1919,7 @@
             controller = null;
             setGenerating(false);
             renderChats();
+            renderHead();
             if (statusEl.textContent === 'generating') setStatus('done');
             input.focus();
           });
@@ -1075,15 +1944,11 @@
       function setChatsOpen(open) {
         chatsEl.className = open ? 'chats open' : 'chats';
         chatsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-        updateChatsLabel();
       }
 
       function updateChatsLabel() {
         var n = STORE.sessions.length;
-        var count = n ? ' (' + n + ')' : '';
-        chatsLabel.textContent = 'chats' + count;
-        chatsToggle.textContent = 'chats' + count +
-          (chatsEl.className.indexOf('open') === -1 ? ' ▸' : ' ▾');
+        chatsLabel.textContent = n ? String(n) : '';
       }
 
       function chatRow(session) {
@@ -1095,7 +1960,11 @@
         var open = document.createElement('button');
         open.type = 'button';
         open.className = 'chat-open';
+        // The title and nothing else. When the row was last used is carried in
+        // an attribute, which the stylesheet draws as a second line.
         open.textContent = title;
+        var when = whenLabel(session.updated, Date.now());
+        if (when) open.setAttribute('data-when', when);
         // Which chat is open is carried by aria-current rather than by the
         // colour alone, which is the part of it a screen reader can hear.
         if (session.id === STORE.current) open.setAttribute('aria-current', 'true');
@@ -1126,11 +1995,8 @@
         }
         chatEmpty.hidden = STORE.sessions.length > 0;
         updateChatsLabel();
+        renderHead();
         setGenerating(generating);   // freshly built rows arrive enabled
-      }
-
-      function clearNode(node) {
-        while (node.firstChild) node.removeChild(node.firstChild);
       }
 
       // A restored chat shows the question and the reply. It does not show the
@@ -1140,9 +2006,16 @@
         for (var i = 0; i < session.messages.length; i++) {
           var m = session.messages[i];
           var t = addTurn(m.role === 'user' ? 'user' : 'assistant');
-          appendText(t.answer, m.content);
+          if (m.role === 'user') {
+            t.answer.className = 'md plain';
+            t.answer.textContent = m.content;
+          } else {
+            t.text = m.content;
+            paint(t);
+          }
         }
-        scrollToEnd();
+        renderEmpty();
+        scrollToEnd(true);
       }
 
       function openSession(id) {
@@ -1154,7 +2027,7 @@
         persist();
         renderChats();
         syncModelSelect();
-        setChatsOpen(false);   // a no-op where the column is always shown
+        setChatsOpen(false);   // a no-op where the rail is always shown
         setStatus('opened ' + (session.title || 'untitled'));
         input.focus();
       }
@@ -1251,6 +2124,7 @@
 
         if (cur) modelSel.value = cur;
         modelSel.disabled = generating || !cur;
+        renderHead();
       }
 
       function noListHint() {
@@ -1303,6 +2177,7 @@
           renderChats();
         } else {
           draftModel = picked;
+          renderHead();
         }
         setStatus(picked);
         input.focus();
@@ -1316,7 +2191,7 @@
 
       newChatBtn.addEventListener('click', newChat);
 
-      // On a phone the panel covers the conversation, so escape closes it.
+      // On a phone the rail covers the conversation, so escape closes it.
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && chatsEl.className.indexOf('open') !== -1) {
           setChatsOpen(false);
@@ -1384,6 +2259,7 @@
 
         renderChats();
         syncModelSelect();
+        renderEmpty();
 
         if (!currentModel()) {
           // The launcher writes runtime.json from the last-used model. Until one

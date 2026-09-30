@@ -1723,6 +1723,20 @@ page_has 'storageUsable' 'the guard against a browser that refuses storage'
 page_has '// --- store:begin ---' 'the start of the testable store block'
 page_has '// --- store:end ---' 'the end of the testable store block'
 
+# Same arrangement for the Markdown renderer, which tests/test-ui-markdown.sh
+# extracts and drives against a stub element factory.
+page_has '// --- markdown:begin ---' 'the start of the testable markdown block'
+page_has '// --- markdown:end ---' 'the end of the testable markdown block'
+
+# Model output is the least trusted text on the page, and building it as
+# elements is what makes the escaping structural. A single innerHTML undoes
+# that, so its absence is asserted rather than assumed.
+if grep -q 'innerHTML' "$UI_HTML"; then
+    fail "index.html must not build markup from a string — model output goes in as text nodes"
+else
+    pass "index.html builds no markup from a string"
+fi
+
 # The page talks to the native API because /v1 cannot express keep_alive. If it
 # ever reached for the compatibility surface, the reasoning models the README
 # recommends would silently lose their thinking field.

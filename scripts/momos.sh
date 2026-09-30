@@ -371,7 +371,7 @@ UI_PID_FILE="$LOG_DIR/ui.pid"
 # existing install picks up a new page without a full reinstall. The number is
 # duplicated in the page on purpose: this heredoc is quoted, so interpolating it
 # here would expand every $VAR in the launcher at install time.
-UI_VERSION="3"
+UI_VERSION="4"
 OLLAMA_URL="http://127.0.0.1:11434"
 
 MODEL=""
