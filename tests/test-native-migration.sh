@@ -27,6 +27,10 @@ UI_HTML="$REPO_ROOT/scripts/ui/index.html"
 # since the launcher's own waits run to 90 seconds.
 REAL_SLEEP="$(command -v sleep)"
 
+# Resolved here for the same reason as sleep: a case that narrows PATH to stubs
+# of its own still has to be able to make a freshly "installed" file executable.
+REAL_CHMOD="$(command -v chmod)"
+
 # Wait for a file a backgrounded stub has yet to create. The server is launched
 # with `&`, so a case that reads what the stub wrote has to give it a turn —
 # but only briefly, or a genuine failure would show up as a slow pass.
@@ -408,6 +412,7 @@ STUB
         if [ -n "$env_branch" ]; then
             echo "MOMOS_BRANCH='$env_branch'"
         fi
+        extract_function "$MOMOS_SH" resolve_branch
         extract_function "$MOMOS_SH" cmd_update
         echo 'cmd_update'
     } > "$tmp/run.sh"
@@ -484,6 +489,7 @@ STUB
     {
         echo "HOME=$tmp/home"
         echo "LOG_DIR=$tmp/home/.momos"
+        extract_function "$MOMOS_SH" resolve_branch
         extract_function "$MOMOS_SH" cmd_update
         echo 'cmd_update'
     } > "$tmp/run.sh"
@@ -762,6 +768,50 @@ else
     fail "expected empty KIND, got: '$OUT'"
 fi
 
+# install_httpd's stdout is read back as the server name — the caller is
+# `kind=$(install_httpd)` — so anything else written there is captured into the
+# value and stops it matching the case that launches the server. The failure is
+# a silent one: `momos ui` installs darkhttpd, then reports it could not start,
+# and works on the second run for reasons nobody watching would guess.
+httpd_install_case() {
+    local tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/bin" "$tmp/home/.momos"
+
+    # Nothing on PATH until pkg "installs" it, which is the path a first
+    # `momos ui` takes on any install that predates darkhttpd.
+    # The stub runs under the narrowed PATH too, so it may only use builtins and
+    # the absolute paths resolved above: `: >` creates the file without touch.
+    cat > "$tmp/bin/pkg" <<STUB
+#!/bin/bash
+: > '$tmp/bin/darkhttpd'
+'$REAL_CHMOD' +x '$tmp/bin/darkhttpd'
+exit 0
+STUB
+    chmod +x "$tmp/bin/pkg"
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo "PATH='$tmp/bin'"
+        extract_function "$MOMOS_SH" httpd_kind
+        extract_function "$MOMOS_SH" install_httpd
+        echo 'kind=$(install_httpd)'
+        echo 'printf "CAPTURED=[%s]\n" "$kind"'
+    } > "$tmp/run.sh"
+
+    OUT=$(bash "$tmp/run.sh" 2>&1)
+    rm -rf "$tmp"
+}
+
+httpd_install_case
+if grep -qxF 'CAPTURED=[darkhttpd]' <<< "$OUT"; then
+    pass "install_httpd's stdout is the server name and nothing else"
+else
+    fail "progress text leaked into the captured server name"
+    show "$OUT"
+fi
+
 # ---------------------------------------------------------------------------
 
 section "launcher — momos serve --lan"
@@ -829,6 +879,7 @@ STUB
         echo "lan_ip() { [ -n '$ip' ] || return 1; printf '%s\\n' '$ip'; }"
         echo "lan_reachable() { return $reachable; }"
         extract_function "$MOMOS_SH" wait_for_server
+        extract_function "$MOMOS_SH" wait_for_ollama
         extract_function "$MOMOS_SH" print_lan_urls
         extract_function "$MOMOS_SH" print_local_urls
         extract_function "$MOMOS_SH" launch_ollama
@@ -882,10 +933,22 @@ fi
 serve_case '--lan' 1 '192.168.1.42' 0
 if [ "$RUN_STATUS" -eq 0 ] \
     && grep -qxF 'OLLAMA_HOST=0.0.0.0:11434' <<< "$OLLAMA_ENV" \
-    && grep -qxF 'OLLAMA_ORIGINS=http://192.168.1.42:*' <<< "$OLLAMA_ENV"; then
+    && grep -qxF 'OLLAMA_ORIGINS=http://192.168.1.42:*,http://localhost:*,http://127.0.0.1:*' <<< "$OLLAMA_ENV"; then
     pass "'serve --lan' binds all interfaces with the exact-IP origin"
 else
     fail "--lan should export OLLAMA_HOST=0.0.0.0:11434 and the exact-IP origin (status=$RUN_STATUS)"
+    show "$OLLAMA_ENV"
+fi
+
+# Setting OLLAMA_ORIGINS replaces Ollama's built-in list rather than adding to
+# it, so the loopback origins have to be named back with it. Without them the
+# page opened on the phone itself — which sends Origin http://localhost:<port>
+# — is refused by the server it is talking to, while the laptop works and
+# nothing on screen explains why.
+if grep -qF 'http://localhost:*,http://127.0.0.1:*' <<< "$OLLAMA_ENV"; then
+    pass "--lan keeps the loopback origins the phone's own page needs"
+else
+    fail "--lan must not drop the loopback origins, or the phone-side page breaks"
     show "$OLLAMA_ENV"
 fi
 
@@ -1050,6 +1113,62 @@ fi
 
 # ---------------------------------------------------------------------------
 
+section "installer — the server it starts before handing over"
+
+# Installing starts a server too, and it has to pin the same bind the launcher
+# does. A bare `ollama serve` inherits whatever OLLAMA_HOST and OLLAMA_ORIGINS
+# the profile exports, and because the server is left running, `ensure_server`
+# later finds it up and never rebinds it — so an install that never mentioned
+# --lan would leave a no-auth API on the Wi-Fi. This is the one case the
+# README's "serve --lan is the only way to change that" has to survive.
+start_server_case() {
+    local tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    cat > "$tmp/ollama" <<STUB
+#!/bin/bash
+{
+    echo "OLLAMA_HOST=\${OLLAMA_HOST:-<unset>}"
+    echo "OLLAMA_ORIGINS=\${OLLAMA_ORIGINS:-<unset>}"
+} > "$tmp/env"
+STUB
+    chmod +x "$tmp/ollama"
+
+    {
+        harness_preamble
+        echo "LOG_DIR='$tmp/home/.momos'"
+        echo 'SERVER_LOG=$LOG_DIR/server.log'
+        echo 'server_up() { return 1; }'
+        echo 'wait_for_server() { return 0; }'
+        extract_function "$MOMOS_SH" start_server
+        echo 'start_server'
+    } > "$tmp/run.sh"
+
+    # Run with a profile that already has ollama exposed by hand: neither
+    # variable may reach the child.
+    OLLAMA_HOST='0.0.0.0:11434' OLLAMA_ORIGINS='*' \
+        PATH="$tmp:$PATH" bash "$tmp/run.sh" > "$tmp/out" 2>&1
+    RUN_STATUS=$?
+    wait_for_file "$tmp/env" || true
+    OLLAMA_ENV="$(cat "$tmp/env" 2>/dev/null || true)"
+    OUT="$(cat "$tmp/out")"
+    rm -rf "$tmp"
+}
+
+start_server_case
+if [ "$RUN_STATUS" -eq 0 ] \
+    && grep -qxF 'OLLAMA_HOST=127.0.0.1:11434' <<< "$OLLAMA_ENV" \
+    && grep -qxF 'OLLAMA_ORIGINS=<unset>' <<< "$OLLAMA_ENV"; then
+    pass "the installer pins the server to loopback whatever the profile exports"
+else
+    fail "the installer must not inherit OLLAMA_HOST / OLLAMA_ORIGINS"
+    show "$OLLAMA_ENV"
+    show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
 section "launcher — the UI page stays current, and survives being offline"
 
 # The page is fetched, so there is a working copy and a network between them,
@@ -1092,6 +1211,7 @@ STUB
         echo "LOG_DIR='$tmp/home/.momos'"
         echo 'UI_DIR=$LOG_DIR/ui'
         echo 'UI_VERSION="3"'
+        extract_function "$MOMOS_SH" resolve_branch
         extract_function "$MOMOS_SH" ensure_ui_files
         echo 'ensure_ui_files'
         echo 'echo "REACHED_END"'
@@ -1176,6 +1296,77 @@ if [ "$RUN_STATUS" -ne 0 ] && grep -q 'Could not download the UI page' <<< "$OUT
 else
     fail "a first install with no network must fail loudly (status=$RUN_STATUS)"
     show "$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+
+section "launcher — which ref updates follow"
+
+# A branch name is pasted into a URL path, and the value read back here was
+# written to disk by an earlier run, so it is not necessarily the one the user
+# typed. A `..` segment would climb out of this repository on the same host and
+# fetch the launcher from somebody else's.
+branch_case() {
+    local file_value="$1" env_value="$2" tmp
+    tmp=$(mktemp -d)
+    mkdir -p "$tmp/home/.momos"
+
+    if [ -n "$file_value" ]; then
+        printf '%s\n' "$file_value" > "$tmp/home/.momos/branch"
+    fi
+
+    {
+        echo 'set -euo pipefail'
+        echo "LOG_DIR='$tmp/home/.momos'"
+        if [ -n "$env_value" ]; then
+            echo "MOMOS_BRANCH='$env_value'"
+        fi
+        extract_function "$MOMOS_SH" resolve_branch
+        echo 'resolve_branch'
+    } > "$tmp/run.sh"
+
+    # stdout only: the refusal is announced on stderr, and the value the fetch
+    # would use is the one this reads.
+    OUT=$(bash "$tmp/run.sh" 2>"$tmp/err")
+    ERR="$(cat "$tmp/err")"
+    rm -rf "$tmp"
+}
+
+branch_case 'release/1.2' ''
+if [ "$OUT" = 'release/1.2' ]; then
+    pass "the ref recorded at install time is the one followed"
+else
+    fail "the recorded ref should be followed, got: '$OUT'"
+fi
+
+# The documented use of MOMOS_BRANCH is testing a branch without re-deciding
+# where the install came from, so it has to win over the recorded file.
+branch_case 'main' 'my-branch'
+if [ "$OUT" = 'my-branch' ]; then
+    pass "MOMOS_BRANCH overrides the recorded ref"
+else
+    fail "MOMOS_BRANCH should win over the file, got: '$OUT'"
+fi
+
+branch_case '' ''
+if [ "$OUT" = 'main' ]; then
+    pass "an install with no recorded ref falls back to main"
+else
+    fail "a missing ref should default to main, got: '$OUT'"
+fi
+
+branch_case 'x/../../evil/repo/main' ''
+if [ "$OUT" = 'main' ] && grep -q 'Ignoring unusable' <<< "$ERR"; then
+    pass "a ref that climbs out of the repository is refused, and says so"
+else
+    fail "a '..' segment must not reach the URL, got: '$OUT'"
+fi
+
+branch_case '' 'evil; rm -rf ~'
+if [ "$OUT" = 'main' ] && grep -q 'Ignoring unusable' <<< "$ERR"; then
+    pass "a ref with characters a branch cannot contain is refused"
+else
+    fail "an unusable ref should fall back to main, got: '$OUT'"
 fi
 
 # ---------------------------------------------------------------------------

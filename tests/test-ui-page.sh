@@ -250,6 +250,21 @@ var INTRINSICS = ['Math', 'Date', 'JSON', 'Promise', 'Error', 'TypeError',
                   'String', 'Number', 'Object', 'Array', 'Boolean', 'isFinite',
                   'RegExp', 'parseInt'];
 
+// Date.now() pinned to `ms`, while `new Date(x)` still builds real dates — the
+// page formats stamps with it. Called with or without `new`, it hands back a
+// real Date either way.
+function frozenDate(ms) {
+  var RealDate = Date;
+  function Frozen(a) {
+    return arguments.length ? new RealDate(a) : new RealDate(ms);
+  }
+  Frozen.now = function () { return ms; };
+  Frozen.parse = RealDate.parse;
+  Frozen.UTC = RealDate.UTC;
+  Frozen.prototype = RealDate.prototype;
+  return Frozen;
+}
+
 function makeEnv(opts) {
   opts = opts || {};
 
@@ -297,6 +312,12 @@ function makeEnv(opts) {
     setImmediate: setImmediate
   };
   INTRINSICS.forEach(function (k) { sandbox[k] = globalThis[k]; });
+
+  // A clock that never moves. Two chats touched inside one millisecond carry
+  // the same stamp, and the page has to keep them in recency order anyway — a
+  // race that turns up on its own only every few runs is a race that gets
+  // written back in. Freezing the clock makes that tie happen every run.
+  if (opts.frozenClock !== undefined) sandbox.Date = frozenDate(opts.frozenClock);
 
   vm.createContext(sandbox);
   // The page's script runs exactly as served. A throw here is a real failure,
@@ -522,6 +543,39 @@ row(switched, 1).childNodes[0].fire('click');
 eq('and does not leak into the other chat', modelValue(switched), 'llama3.2:3b');
 row(switched, 0).childNodes[0].fire('click');
 eq('and is still there when you come back to it', modelValue(switched), 'qwen2.5:7b');
+
+// ---- two chats touched inside one millisecond ------------------------------
+// The clock is stopped, so every chat here carries the same `updated` and the
+// ordering cannot lean on the timestamp at all. It has to come from the order
+// the chats were last touched — without it the rail shows the older chat at the
+// top and the reload reopens the wrong one, and it does so only on runs where
+// the two touches happen to straddle a millisecond boundary.
+var frozen = makeEnv({ frozenClock: 1700000000000 });
+await settle();
+
+sendText(frozen, 'first chat');
+await settle();
+eq('two chats under one stamp are ordered by recency',
+   rowText(frozen, 0), 'first chat');
+
+el(frozen, 'new-chat').fire('click');
+sendText(frozen, 'second chat');
+await settle();
+eq('the newer chat is on top even with an identical stamp',
+   rowText(frozen, 0), 'second chat');
+eq('and the older one is below it', rowText(frozen, 1), 'first chat');
+
+// Touching the older chat is what has to move it back to the head — a stamp it
+// shares with the other chat cannot do that on its own.
+row(frozen, 1).childNodes[0].fire('click');
+el(frozen, 'model').value = 'qwen2.5:7b';
+el(frozen, 'model').fire('change');
+eq('touching the older chat brings it to the top',
+   rowText(frozen, 0), 'first chat');
+var frozenReload = makeEnv({ mem: frozen.mem, frozenClock: 1700000000000 });
+await settle();
+eq('and it is the one a reload reopens',
+   rowText(frozenReload, 0), 'first chat');
 
 // ---- a chat whose model has gone -------------------------------------------
 

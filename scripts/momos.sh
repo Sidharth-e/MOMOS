@@ -23,7 +23,19 @@ OLLAMA_URL="http://127.0.0.1:11434"
 # Which ref the scripts fetch from. Override to install or test a branch:
 #   MOMOS_BRANCH=my-branch bash -c "$(curl -fsSL .../my-branch/scripts/momos.sh)"
 # Exported so the launcher and any child script inherit the same ref.
+#
+# A branch name is pasted into a URL path, so it is held to what a ref can
+# actually contain. A `..` segment would otherwise climb out of this repository
+# on the same host and fetch the launcher from somebody else's — and because the
+# value is written to $LOG_DIR/branch, a bad one would be followed by every
+# later update rather than only by this run.
 MOMOS_BRANCH="${MOMOS_BRANCH:-main}"
+case "$MOMOS_BRANCH" in
+    ''|*[!A-Za-z0-9._/-]*|*..*)
+        echo "Ignoring unusable MOMOS_BRANCH '$MOMOS_BRANCH' — using main." >&2
+        MOMOS_BRANCH="main"
+        ;;
+esac
 export MOMOS_BRANCH
 MOMOS_RAW="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${MOMOS_BRANCH}"
 LEGACY_INSTALL_URL="${MOMOS_RAW}/scripts/legacy/proot/momos.sh"
@@ -326,7 +338,14 @@ start_server() {
     fi
 
     info "Starting Ollama server"
-    nohup ollama serve >> "$LOG_DIR/server.log" 2>&1 &
+    # Pinned, like launch_ollama in the launcher and for the same reason: a bare
+    # `ollama serve` inherits OLLAMA_HOST and OLLAMA_ORIGINS from the profile of
+    # whoever ran the installer, which would expose the API to the Wi-Fi during
+    # an install that never asked for it — and `ensure_server` would later find
+    # it already up and never rebind it. `env -u` drops the variable rather than
+    # emptying it, which Ollama does not treat as the same thing.
+    env -u OLLAMA_ORIGINS OLLAMA_HOST="127.0.0.1:11434" \
+        nohup ollama serve >> "$LOG_DIR/server.log" 2>&1 &
 
     if wait_for_server 90; then
         success "Ollama server ready"
@@ -395,6 +414,17 @@ wait_for_server() {
     return 1
 }
 
+# The one place that says what to do when the server never comes up. Four call
+# sites spelled this block out; the message and the exit were the same at each,
+# and it is the message a user is most likely to have to act on.
+wait_for_ollama() {
+    if wait_for_server 90; then
+        return 0
+    fi
+    echo "Ollama did not start. Check $SERVER_LOG"
+    exit 1
+}
+
 # Every bind choice goes through here, so the pinning rule lives in one place:
 # OLLAMA_HOST is set on this command only, never inherited. Anyone with it
 # exported in their shell profile would otherwise expose the server without
@@ -419,10 +449,7 @@ ensure_server() {
     fi
     echo "Starting Ollama server..."
     launch_ollama "127.0.0.1:11434"
-    if ! wait_for_server 90; then
-        echo "Ollama did not start. Check $SERVER_LOG"
-        exit 1
-    fi
+    wait_for_ollama
 }
 
 is_number() {
@@ -530,6 +557,10 @@ httpd_kind() {
     fi
 }
 
+# Prints the name of a usable static file server on stdout, and nothing else:
+# the caller reads it with `kind=$(install_httpd)`, so a progress line printed
+# to stdout would be captured into the value and stop it matching any case.
+# Everything the user reads goes to stderr.
 install_httpd() {
     local kind
     kind=$(httpd_kind)
@@ -538,14 +569,14 @@ install_httpd() {
         return 0
     fi
 
-    echo "Installing darkhttpd (static file server, ~1MB)..."
+    echo "Installing darkhttpd (static file server, ~1MB)..." >&2
     if pkg install -y darkhttpd >> "$LOG_DIR/install.log" 2>&1 \
         && command -v darkhttpd > /dev/null 2>&1; then
         echo darkhttpd
         return 0
     fi
 
-    echo "darkhttpd is not available — falling back to python (~40MB)."
+    echo "darkhttpd is not available — falling back to python (~40MB)." >&2
     if pkg install -y python >> "$LOG_DIR/install.log" 2>&1 \
         && command -v python3 > /dev/null 2>&1; then
         echo python3
@@ -553,6 +584,26 @@ install_httpd() {
     fi
 
     return 1
+}
+
+# The ref every fetch below follows: the one recorded at install time, unless
+# MOMOS_BRANCH overrides it for a one-off. Held to what a git ref can contain
+# for the reason given at the top of the installer — it reaches a URL path, and
+# the value being read back here came from a file that outlives the run which
+# wrote it, so a bad one would be followed by every later update.
+resolve_branch() {
+    local branch
+    branch=$(cat "$LOG_DIR/branch" 2>/dev/null || echo main)
+    branch="${MOMOS_BRANCH:-$branch}"
+
+    case "$branch" in
+        ''|*[!A-Za-z0-9._/-]*|*..*)
+            echo "Ignoring unusable branch name '$branch' — using main." >&2
+            branch="main"
+            ;;
+    esac
+
+    echo "$branch"
 }
 
 # The page lives on the device so the UI works with no network; a missing or
@@ -566,8 +617,7 @@ ensure_ui_files() {
     mkdir -p "$UI_DIR"
 
     local branch url
-    branch=$(cat "$LOG_DIR/branch" 2>/dev/null || echo main)
-    branch="${MOMOS_BRANCH:-$branch}"
+    branch=$(resolve_branch)
     url="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${branch}/scripts/ui/index.html"
 
     # The marker is the page's own version stamp. Matching the exact version (not
@@ -586,11 +636,15 @@ ensure_ui_files() {
 
     # Download beside the old file and move it in only once it is really our
     # page: curl -o truncates its target before it can fail, so writing straight
-    # to index.html would destroy a working page on a dropped connection. Any
-    # marker will do here — requiring this exact version would refetch forever
-    # while the page on a branch runs ahead of a launcher that is due an update.
+    # to index.html would destroy a working page on a dropped connection.
+    #
+    # The stamp is matched whole rather than as the bare substring "momos-ui:",
+    # which any response — a captive portal echoing the request back, say —
+    # could contain. Any *version* will do, though: requiring this exact one
+    # would refetch forever while the page on a branch runs ahead of a launcher
+    # that is due an update.
     if curl -fsSL "$url" -o "$UI_DIR/index.html.new" \
-        && grep -q "momos-ui:" "$UI_DIR/index.html.new" 2>/dev/null; then
+        && grep -q '<!-- momos-ui:[0-9][0-9]* -->' "$UI_DIR/index.html.new" 2>/dev/null; then
         mv "$UI_DIR/index.html.new" "$UI_DIR/index.html"
         return 0
     fi
@@ -873,7 +927,7 @@ print_lan_urls() {
     echo "  OpenAI-compatible: http://${ip}:11434/v1"
     echo "                     (any non-empty key; the server ignores it)"
     echo "  Chat page:         run 'momos ui' in this session, then open"
-    echo "                     http://${ip}:8080"
+    echo "                     the URL it prints (port 8080 by default)"
     echo ""
     echo "  No login: anyone on your Wi-Fi can reach these, and the API is not"
     echo "  read-only — they can list, pull and delete your models."
@@ -960,10 +1014,7 @@ cmd_serve() {
     if [ "$lan_mode" -eq 0 ]; then
         echo "Starting Ollama server in the background..."
         launch_ollama "127.0.0.1:11434"
-        if ! wait_for_server 90; then
-            echo "Ollama did not start. Check $SERVER_LOG"
-            exit 1
-        fi
+        wait_for_ollama
         echo "Ollama is running."
         echo ""
         print_local_urls
@@ -978,15 +1029,15 @@ cmd_serve() {
         echo "blocked by Ollama's CORS check. Other clients — curl, the OpenAI"
         echo "SDKs — send no Origin and are unaffected."
         echo ""
-        echo "To allow browsers anyway, set the origin by hand:"
+        echo "To allow browsers anyway, set the origin by hand — the loopback"
+        echo "entries included, or the page on the phone itself will be refused:"
         echo ""
-        echo "  OLLAMA_HOST=0.0.0.0 OLLAMA_ORIGINS='http://<phone-ip>:*' ollama serve"
+        echo "  OLLAMA_HOST=0.0.0.0 \\"
+        echo "    OLLAMA_ORIGINS='http://<phone-ip>:*,http://localhost:*,http://127.0.0.1:*' \\"
+        echo "    ollama serve"
         echo ""
         launch_ollama "0.0.0.0:11434"
-        if ! wait_for_server 90; then
-            echo "Ollama did not start. Check $SERVER_LOG"
-            exit 1
-        fi
+        wait_for_ollama
         echo "Ollama is running, exposed but with browser access blocked."
         echo ""
         echo "  All output: $SERVER_LOG   (momos logs)"
@@ -1001,12 +1052,16 @@ cmd_serve() {
     # such as http://192.168.1.5.evil.com, while `http://<ip>:*` pins the host
     # exactly and leaves the port free — which is what the page needs, since
     # `momos ui` can be given any port.
-    launch_ollama "0.0.0.0:11434" "http://${ip}:*"
+    #
+    # The loopback origins are named back explicitly because setting
+    # OLLAMA_ORIGINS replaces Ollama's built-in list rather than adding to it.
+    # Without them the page opened on the phone itself — which dials 127.0.0.1
+    # and sends `Origin: http://localhost:<port>` — is refused by the very
+    # server it is talking to, while the laptop works and gives no clue why.
+    launch_ollama "0.0.0.0:11434" \
+        "http://${ip}:*,http://localhost:*,http://127.0.0.1:*"
 
-    if ! wait_for_server 90; then
-        echo "Ollama did not start. Check $SERVER_LOG"
-        exit 1
-    fi
+    wait_for_ollama
 
     # The API answering on loopback only proves it started, not that the LAN
     # bind took effect. Without this second probe a failed bind would be
@@ -1112,8 +1167,7 @@ cmd_update() {
     local branch url
     # Follow whichever ref this install came from, so testing a branch does not
     # silently drop the user back onto main.
-    branch=$(cat "$LOG_DIR/branch" 2>/dev/null || echo main)
-    branch="${MOMOS_BRANCH:-$branch}"
+    branch=$(resolve_branch)
     url="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${branch}/scripts/momos.sh"
     echo "Updating MOMOS (ref: ${branch})..."
     pkg upgrade -y ollama >> "$LOG_DIR/install.log" 2>&1 || true
@@ -1237,9 +1291,10 @@ install_ui() {
 
     # The same download-beside-then-move dance as ensure_ui_files, for the same
     # reason: curl -o truncates its target before it can fail, so an update on a
-    # phone with no network would otherwise delete a page that still works.
+    # phone with no network would otherwise delete a page that still works. The
+    # stamp is matched whole here too, for the reason given there.
     if curl -fsSL "$url" -o "$UI_DIR/index.html.new" \
-        && grep -q "momos-ui:" "$UI_DIR/index.html.new" 2>/dev/null; then
+        && grep -q '<!-- momos-ui:[0-9][0-9]* -->' "$UI_DIR/index.html.new" 2>/dev/null; then
         mv "$UI_DIR/index.html.new" "$UI_DIR/index.html"
         success "Installed web UI page"
     else
@@ -1293,9 +1348,12 @@ uninstall_momos() {
 
             # The UI server is backgrounded, so nothing else would end it and it
             # would go on serving a page the next step deletes. Matched on the
-            # directory it serves, which is what makes it ours.
+            # directory it serves, which is what makes it ours — but spelled as
+            # the tail of that path rather than the whole of it, because pkill -f
+            # takes an extended regex and the dots and slashes of a full path
+            # would not all be literal ones. `~/.momos/ui` contains none.
             info "Stopping web UI..."
-            pkill -f "$UI_DIR" 2>/dev/null || true
+            pkill -f 'momos/ui' 2>/dev/null || true
 
             info "Removing Ollama..."
             pkg uninstall -y ollama 2>/dev/null || true

@@ -212,6 +212,12 @@ eq('a protocol-relative link is refused', hrefOf('[x](//evil.example.com)'), nul
 // it; stripping those first is what makes the check above hold.
 eq('a scheme split by a newline is refused', hrefOf('[x](java\nscript:alert(1))'), null);
 eq('a scheme split by a tab is refused', hrefOf('[x](java\tscript:alert(1))'), null);
+// A backslash reads as a slash to a browser, so "/\host" is the same address as
+// "//host" — the form refused above. Normalising it before that check is what
+// keeps the refusal about where a link goes rather than how it is spelled.
+eq('a backslash cannot smuggle a protocol-relative link',
+   hrefOf('[x](/\\evil.example.com)'), null);
+eq('a doubled backslash is refused too', hrefOf('[x](\\\\evil.example.com)'), null);
 eq('a refused link still shows what was written', textOf('[x](javascript:alert(1))'),
    'x (javascript:alert(1))');
 eq('an angle-bracket autolink works', hrefOf('<https://example.com>'), 'https://example.com');

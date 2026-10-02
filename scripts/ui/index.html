@@ -139,17 +139,28 @@
     margin-left: -0.3rem;
   }
 
-  .chats-new {
-    margin-left: auto;
+  /* Every button in the page: the chat-list controls, the icons and the
+     composer's send/stop. Each rule below keeps only what makes it that
+     control — its type size, colour and padding — so a new button cannot
+     arrive with a slightly different border by accident. Declared before them
+     so those rules still win where specificity is equal. */
+  .chats-new,
+  .chats-toggle,
+  .icon,
+  .composer button {
     flex: none;
     font: inherit;
+    background: transparent;
+    border: 1px solid var(--line);
+    cursor: pointer;
+  }
+
+  .chats-new {
+    margin-left: auto;
     font-size: var(--t-xs);
     letter-spacing: 0.04em;
     color: var(--phosphor);
-    background: transparent;
-    border: 1px solid var(--line);
     padding: 0.2rem 0.5rem;
-    cursor: pointer;
   }
 
   .chats-new:hover:not(:disabled) { border-color: var(--phosphor); }
@@ -273,16 +284,11 @@
 
   .chats-toggle {
     display: none;
-    flex: none;
-    font: inherit;
     font-family: var(--mono);
     font-size: var(--t-sm);
     line-height: 1;
     color: var(--muted);
-    background: transparent;
-    border: 1px solid var(--line);
     padding: 0.4rem 0.5rem;
-    cursor: pointer;
   }
 
   .chats-toggle:hover { color: var(--text); border-color: var(--phosphor); }
@@ -329,15 +335,10 @@
   .model-pick select:disabled { color: var(--muted); }
 
   .icon {
-    flex: none;
-    font: inherit;
     font-family: var(--mono);
     font-size: var(--t-xs);
     color: var(--phosphor);
-    background: transparent;
-    border: 1px solid var(--line);
     padding: 0 0.55rem;
-    cursor: pointer;
   }
 
   .icon:hover:not(:disabled) { border-color: var(--phosphor); }
@@ -624,15 +625,10 @@
   .composer textarea:focus { outline: none; }
 
   .composer button {
-    flex: none;
-    font: inherit;
     font-family: var(--mono);
     font-size: var(--t-xs);
     color: var(--phosphor);
-    background: transparent;
-    border: 1px solid var(--line);
     padding: 0.4rem 0.8rem;
-    cursor: pointer;
   }
 
   .composer button:hover:not(:disabled) { border-color: var(--phosphor); }
@@ -879,6 +875,22 @@
           typeof m.content === 'string';
       }
 
+      // Recency is carried twice: `updated` is the wall-clock stamp the rail
+      // shows, and the position in STORE.sessions is the order everything else
+      // reads through byRecency. Date.now() only resolves to the millisecond,
+      // so two chats touched inside one of them compare equal -- starting a
+      // chat and switching the model on another are milliseconds apart -- and
+      // the sort would then keep whichever of the two happened to sit first in
+      // the array. Moving the chat to the head on every touch makes the array
+      // order the recency order, so that fallback gives the right answer
+      // instead of an arbitrary one.
+      function touch(session) {
+        session.updated = Date.now();
+        var at = STORE.sessions.indexOf(session);
+        if (at !== -1) STORE.sessions.splice(at, 1);
+        STORE.sessions.unshift(session);
+      }
+
       // Newest first, so "the most recent chat" is the head of the list and the
       // storage cap is a slice.
       function byRecency(sessions) {
@@ -1020,6 +1032,11 @@
       function safeHref(url) {
         var u = String(url == null ? '' : url).replace(/[\u0000- \u007f]+/g, '');
         if (!u) return null;
+        // A browser reads a backslash as a slash in http(s) URLs, so "/\host"
+        // is the same address as "//host" — the protocol-relative form the
+        // check below exists to refuse. Normalised before that check rather
+        // than added to it, so every later test sees what the browser will.
+        u = u.replace(/\\/g, '/');
         // Protocol-relative: it is a link to somebody else's server wearing the
         // page's own scheme, which is not something to hand a model.
         if (u.charAt(0) === '/' && u.charAt(1) === '/') return null;
@@ -1542,11 +1559,9 @@
         banner.hidden = false;
       }
 
+      // The open chat, which is findSession with the id the store remembers.
       function activeSession() {
-        for (var i = 0; i < STORE.sessions.length; i++) {
-          if (STORE.sessions[i].id === STORE.current) return STORE.sessions[i];
-        }
-        return null;
+        return findSession(STORE.current);
       }
 
       function findSession(id) {
@@ -1621,7 +1636,7 @@
       }
 
       function clearLog() {
-        while (logEl.firstChild) logEl.removeChild(logEl.firstChild);
+        clearNode(logEl);
         renderEmpty();
       }
 
@@ -1857,7 +1872,7 @@
         if (!session.model) session.model = currentModel();
 
         session.messages.push({ role: 'user', content: text });
-        session.updated = Date.now();
+        touch(session);
         if (session.messages.length === 1) session.title = titleFor(text);
 
         var yours = addTurn('user');
@@ -1912,7 +1927,7 @@
             hideCaret(current);
             if (current && current.text) {
               session.messages.push({ role: 'assistant', content: current.text });
-              session.updated = Date.now();
+              touch(session);
               persist();
             }
             current = null;
@@ -2018,18 +2033,27 @@
         scrollToEnd(true);
       }
 
+      // Every path that changes which chat is open ends the same way: write it
+      // down, redraw the list and the picker, say what happened, and put the
+      // caret back in the box. `closeRail` is for the two paths that leave a
+      // chat open behind the phone's chat rail; it is a no-op where the rail is
+      // always shown.
+      function afterChange(status, closeRail) {
+        persist();
+        renderChats();
+        syncModelSelect();
+        if (closeRail) setChatsOpen(false);
+        setStatus(status);
+        input.focus();
+      }
+
       function openSession(id) {
         var session = findSession(id);
         if (!session || generating) return;
 
         STORE.current = id;
         replay(session);
-        persist();
-        renderChats();
-        syncModelSelect();
-        setChatsOpen(false);   // a no-op where the rail is always shown
-        setStatus('opened ' + (session.title || 'untitled'));
-        input.focus();
+        afterChange('opened ' + (session.title || 'untitled'), true);
       }
 
       function newChat() {
@@ -2042,12 +2066,7 @@
         // start one is a new subject, not a different model.
         if (prev && prev.model) draftModel = prev.model;
 
-        persist();
-        renderChats();
-        syncModelSelect();
-        setChatsOpen(false);
-        setStatus('new chat');
-        input.focus();
+        afterChange('new chat', true);
       }
 
       function deleteSession(id) {
@@ -2071,11 +2090,7 @@
           if (next) replay(next); else clearLog();
         }
 
-        persist();
-        renderChats();
-        syncModelSelect();
-        setStatus('deleted');
-        input.focus();
+        afterChange('deleted', false);
       }
 
       // ---- the model picker ----
@@ -2172,7 +2187,7 @@
         var session = activeSession();
         if (session) {
           session.model = picked;
-          session.updated = Date.now();
+          touch(session);
           persist();
           renderChats();
         } else {

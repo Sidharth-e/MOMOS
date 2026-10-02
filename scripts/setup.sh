@@ -18,7 +18,17 @@ LOG_FILE="$LOG_DIR/setup.log"
 # Which ref the scripts fetch from. Override to install or test a branch:
 #   MOMOS_BRANCH=my-branch bash -c "$(curl -fsSL .../my-branch/scripts/setup.sh)"
 # Exported so the launcher and any child script inherit the same ref.
+#
+# Held to what a git ref can contain, because the name is pasted into a URL
+# path: a `..` segment would climb out of this repository on the same host and
+# fetch the installer from somebody else's.
 MOMOS_BRANCH="${MOMOS_BRANCH:-main}"
+case "$MOMOS_BRANCH" in
+    ''|*[!A-Za-z0-9._/-]*|*..*)
+        echo "Ignoring unusable MOMOS_BRANCH '$MOMOS_BRANCH' — using main." >&2
+        MOMOS_BRANCH="main"
+        ;;
+esac
 export MOMOS_BRANCH
 MOMOS_RAW="https://raw.githubusercontent.com/Sidharth-e/MOMOS/${MOMOS_BRANCH}"
 NATIVE_INSTALL_URL="${MOMOS_RAW}/scripts/momos.sh"
