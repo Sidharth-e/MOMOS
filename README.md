@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Termux-brightgreen.svg)](https://termux.dev)
-[![Architecture](https://img.shields.io/badge/Architecture-ARM64%20%28PRoot%29-blue.svg)](#how-it-works)
+[![Architecture](https://img.shields.io/badge/Architecture-arm64%20%7C%20x86__64-blue.svg)](#requirements)
 [![Root](https://img.shields.io/badge/Root-Not%20Required-success.svg)](#requirements)
 [![Offline](https://img.shields.io/badge/Privacy-100%25%20Offline-blueviolet.svg)](#how-it-works)
 
@@ -14,10 +14,10 @@ Nothing leaves your phone unless you ask it to. The model server listens on the 
 
 ## What it does
 
-- Checks your phone's RAM and storage
-- Sets up a Debian container in Termux via PRoot (no root needed)
-- Installs Ollama and downloads a model tailored to your device
-- Adds a simple `momos` command to chat and manage models
+- Checks your phone's architecture, RAM and storage
+- Installs Ollama as a native Termux package — no container, no root
+- Downloads a model sized for your device
+- Adds a simple `momos` command to chat, serve the web UI and manage models
 
 ---
 
@@ -29,7 +29,9 @@ Open **[Termux](https://f-droid.org/packages/com.termux/)** and run:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/momos.sh)"
 ```
 
-The installer will test your hardware, recommend a model, set up the environment, and drop you straight into chat.
+The installer checks your hardware, recommends a model, installs Ollama,
+downloads the model, and installs the `momos` command. It prints how to start
+when it is done.
 
 ---
 
@@ -56,7 +58,8 @@ You can also use any model tag from the [Ollama library](https://ollama.com/libr
 ```bash
 momos
 ```
-Shows a numbered menu to chat, browse models, pull new models, or update.
+Shows a numbered menu: chat, open the web UI, list, pull and delete models, view
+logs, update, or uninstall.
 
 ### Chat
 ```bash
@@ -113,6 +116,8 @@ This rebinds Ollama to all interfaces and tells it which browser origins to acce
   Ollama:            http://192.168.1.42:11434
   OpenAI-compatible: http://192.168.1.42:11434/v1
                      (any non-empty key; the server ignores it)
+  Chat page:         run 'momos ui' in this session, then open
+                     the URL it prints (port 8080 by default)
 ```
 
 It returns to the prompt once the server answers, so `momos ui` can be started
@@ -170,6 +175,11 @@ over the network would be the one thing on it that fails when the phone is
 offline. It covers what a small model actually writes and shows anything else as
 plain text rather than guessing.
 
+Send starts a reply and **Stop** cancels one mid-generation, which matters when
+a small model gets stuck in a loop. The ↻ beside the model picker re-reads the
+installed models. Run on the phone, `momos ui` also opens the page in the
+phone's browser for you.
+
 The picker offers everything `momos models` would list, and each chat keeps the
 model it was using — so a DeepSeek R1 reasoning thread and a small quick model
 can sit side by side. A new chat starts from whichever model you used last; run
@@ -215,8 +225,21 @@ installing it on first use. If darkhttpd is unavailable it falls back to
 ### Update & Uninstall
 ```bash
 momos update                     # Update MOMOS scripts and Ollama
-momos uninstall                  # Remove Debian container and all models
+momos uninstall                  # Remove Ollama, MOMOS and (if you confirm) models
 momos help                       # Show all commands
+```
+
+`momos uninstall` stops both background servers, removes Ollama, the launcher
+and `~/.momos`, and asks before deleting downloaded models.
+
+### Testing a branch
+
+The installers and `momos update` follow the ref they were installed from. Set
+`MOMOS_BRANCH` to install or update from a branch — the value is checked before
+it reaches a URL, and it is recorded so later updates keep following it:
+
+```bash
+MOMOS_BRANCH=my-branch bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/my-branch/scripts/momos.sh)"
 ```
 
 ---
@@ -224,16 +247,35 @@ momos help                       # Show all commands
 ## Requirements
 
 - **Android 7.0+**
+- **64-bit device** (`arm64` or `x86_64`) — Ollama's Termux package is built for
+  64-bit only. On a 32-bit device, see [32-bit devices](#32-bit-devices)
 - **Termux** (install from [F-Droid](https://f-droid.org/packages/com.termux/) or [GitHub](https://github.com/termux/termux-app/releases), avoid Play Store builds)
-- **RAM**: 2GB minimum (4GB+ recommended for 3B models, 8GB+ for 7B models)
-- **Free Storage**: 3GB to 6GB+ depending on chosen model
+- **RAM**: 2GB minimum (4GB+ recommended for 3B models, 6–8GB for 7B models)
+- **Free Storage**: 2GB minimum; ~2.5GB for a 3B model, ~6GB for a 7B model
 - **No root required**
+
+### 32-bit devices
+
+A 32-bit phone — or a 64-bit phone with a 32-bit Termux, which reports
+`armv8l` — cannot install the native Ollama package. Both installers notice
+this and point you at the legacy script, which sets up a Debian container via
+PRoot and installs Ollama inside it instead:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/legacy/proot/momos.sh)"
+```
+
+It needs roughly 1–2GB more storage and runs more slowly, but the `momos`
+command it installs is the same. Running `scripts/setup.sh` picks the right one
+for the device automatically.
 
 ---
 
 ## New to Termux?
 
-If you just installed Termux, run this setup script first to update packages and grant storage permissions:
+If you just installed Termux, run this setup script first. It updates packages,
+grants storage permissions, and then offers to install MOMOS — picking native or
+legacy for your device:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Sidharth-e/MOMOS/main/scripts/setup.sh)"
@@ -255,22 +297,23 @@ Then run the Quick Install command above.
 ## How It Works
 
 ```
-┌─────────────────────────────────────────┐
-│  Termux (Android)                       │
-│  ┌───────────────────────────────────┐  │
-│  │  Debian (via PRoot — no root)     │  │
-│  │  ┌─────────────────────────────┐  │  │
-│  │  │  Ollama Server (background) │  │  │
-│  │  │  └─ Local Model (<7B)       │  │  │
-│  │  └─────────────────────────────┘  │  │
-│  └───────────────────────────────────┘  │
-│  └─ 'momos' launcher command            │
-└─────────────────────────────────────────┘
+Termux (Android)
+├── Ollama server (native, background)
+│     └─ local model (<7B)
+├── darkhttpd ──> the web UI page
+└── 'momos' launcher command
+
+32-bit devices: the same CLI, with Debian
+under PRoot providing Ollama instead.
 ```
 
-1. **PRoot**: Runs a Debian userland container without root permissions.
-2. **Ollama**: Runs the model server inside the container.
-3. **MOMOS launcher**: A bash script in `$PREFIX/bin/momos` that handles starting the server, attaching to chats, and managing models with simple arguments.
+1. **Ollama**: installed as a native Termux package and run in the background —
+   no container, no root. It listens on the phone only unless you pass `--lan`.
+2. **Web UI**: a self-contained static page, served to the phone or your Wi-Fi
+   by [darkhttpd](https://github.com/emikulic/darkhttpd).
+3. **MOMOS launcher**: a bash script in `$PREFIX/bin/momos` that handles
+   starting the server, serving the page, attaching to chats, and managing
+   models with simple arguments.
 
 ---
 
@@ -300,6 +343,11 @@ momos chat deepseek-r1:1.5b
 ### Keeping Termux alive in background
 Run `termux-wake-lock` to keep Android from sleeping Termux during inference.
 
+### The installer says Ollama needs a 64-bit device
+That build is 64-bit only. The installer prints the legacy command to use
+instead — see [32-bit devices](#32-bit-devices). `scripts/setup.sh` makes this
+choice for you.
+
 ### The laptop can't reach the model
 
 Two causes look identical from the browser, so check both.
@@ -313,6 +361,11 @@ momos serve --lan
 If it reports that the server is already running but only on this phone, that is the answer — run `momos stop` and then `momos serve --lan` again. The bind only changes on a restart.
 
 **The browser's origin is no longer allowed.** `--lan` pins the origin to the phone's address at the moment it starts. If the phone got a new address since (a fresh DHCP lease, or a different network), the page still loads but its requests are refused. Restart `momos serve --lan` to re-pin it.
+
+### The web page still loads after `momos stop`
+
+The Ollama server and the web server have separate lifecycles. `momos stop`
+ends the model server; `momos ui stop` ends the page.
 
 ### The web page says no model is chosen
 
