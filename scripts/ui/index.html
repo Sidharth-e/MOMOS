@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="robots" content="noindex">
-<!-- momos-ui:4 -->
+<!-- momos-ui:5 -->
 <title>MOMOS — web ui</title>
 <!--
   The chat page for `momos ui`.
@@ -25,7 +25,15 @@
   has no endpoint to post a chat to, and giving it one would mean another
   process competing with the model for the phone's memory. The cost is that the
   laptop's chats and the phone's chats are separate, and clearing site data
-  clears them — which is what the notice on the page says.
+  clears them — which is what the rail's footer says.
+
+  The look is "transcript": the conversation is a document emitted by a small
+  machine, not a feed of bubbles. Structure is drawn with hairlines at low
+  opacity and with the type itself — the model's prose is set in the system
+  serif, because it is what you read; your own words stay in mono, because you
+  typed them into a machine; the chrome is sans. One colour is allowed to mean
+  something: ochre marks the model running, and appears nowhere else except the
+  open thread and keyboard focus. Nothing here is fetched.
 
   Two blocks in here are lifted out and run under node by the test suite, and
   the markers around them are what the tests look for. Everything between
@@ -34,11 +42,10 @@
   build through the element factory it is handed rather than a global. Move a
   marker and the test that reads it finds an empty block.
 
-  The page is drawn as one full-height app: a rail of chats on the left and a
-  column of conversation on the right, each scrolling on its own. Monospace and
-  the phosphor palette carry the chrome — the rail, the chrome, the code — and
-  message prose is set in the system sans, because a paragraph of monospace is
-  the one thing on this page that is genuinely hard to read.
+  The page is drawn as one full-height shell: a rail of chats on the left and a
+  column of conversation on the right, each scrolling on its own. The rail has
+  three states — expanded, a collapsed strip of initial-chips, and on a phone a
+  drawer over the conversation — and the choice of the first two is remembered.
 
   The `momos-ui:` marker above is a version stamp. The launcher and installer
   look for it to decide whether the copy on the device is current, so it must
@@ -46,743 +53,786 @@
 -->
 <style>
   :root {
-    --paper:     #070b0e;  /* unlit tube */
-    --rail:      #090e12;  /* the sidebar, a shade behind the page */
-    --panel:     #0c1317;
-    --code:      #05090b;
-    --line:      #1e2c31;
-    --text:      #c6d4d2;
-    --muted:     #7d8e92;  /* the DIM attribute */
-    --faint:     #5c6c70;  /* the rail's second line */
-    --phosphor:  #6fe3d2;  /* ANSI cyan */
-    --amber:     #e8b75c;  /* ANSI yellow, used once */
+    color-scheme: dark;
 
-    /* Two families, deliberately different: the mono is the machine talking —
-       the rail, the chrome, code, your own words — and the sans is the part
-       you actually read. Neither is fetched; both are whatever the device
-       already has, which is the only honest choice offline. */
-    --mono: ui-monospace, "SF Mono", "Roboto Mono", "DejaVu Sans Mono",
-            Menlo, Consolas, "Liberation Mono", monospace;
-    --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    /* ground — warm graphite, paper grey under warm light, not blue-black */
+    --ground:  #0e0d0b;
+    --rail:    #131211;
+    --raise:   #1a1817;
+    --sunk:    #090808;
+
+    /* structure — drawn with light rather than with boxes */
+    --line:    rgba(233, 226, 210, 0.09);
+    --line-2:  rgba(233, 226, 210, 0.18);
+
+    /* ink */
+    --ink:     #e9e4da;
+    --dim:     #9c9589;
+    --faint:   #6f6a61;
+
+    /* the signal: the machine is working */
+    --signal:      #cfa63a;
+    --signal-soft: rgba(207, 166, 58, 0.16);
+    --signal-line: rgba(207, 166, 58, 0.42);
+    --alarm:       #c9603f;
+
+    /* Three families, deliberately different: the serif is what you read, the
+       mono is the machine talking and the words you typed into it, and the sans
+       is the chrome. None is fetched; all three are whatever the device already
+       has, which is the only honest choice offline. */
+    --sans:  ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
              "Helvetica Neue", Arial, sans-serif;
+    --serif: ui-serif, Charter, "Bitstream Charter", "Iowan Old Style",
+             "Palatino Linotype", Palatino, Georgia, serif;
+    --mono:  ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono",
+             "Liberation Mono", monospace;
 
-    --t-xs:   0.72rem;   /* rail metadata */
-    --t-sm:   0.8rem;    /* chrome: buttons, status, notices */
-    --t-md:   0.9375rem; /* prose */
-    --t-code: 0.82rem;
+    --t-xs: 0.6875rem;   /* rail metadata, instrumentation */
+    --t-sm: 0.8125rem;   /* chrome: buttons, stamps, notices */
+    --t-md: 0.9375rem;   /* the bar title */
 
-    --rail-col: 15rem;
-    /* Under 80 characters, and a shade under the 68ch a proportional face
-       wants, because this column also has to hold code and tables. */
-    --measure: 66ch;
+    --rail-w: 16.5rem;
+    --rail-c: 3.5rem;
+    --ease:   cubic-bezier(.2, .7, .3, 1);
+
+    /* The page's one gutter. Named rather than repeated, because the composer
+       has to add exactly this back on to the measure to line its card up with
+       the text column — and a second copy of the expression would drift from
+       this one the moment either is touched. */
+    --pad: clamp(1rem, 3vw, 1.75rem);
+
+    /* A shade under the 68ch a proportional face wants, because this column
+       also has to hold code and tables. Note that a `ch` in a custom property
+       declared here resolves against the root font-size, not the element that
+       ends up using it, so this is a fixed width rather than a per-element one
+       — which is what makes it usable as the shared measure for the column and
+       the card together. */
+    --measure: 64ch;
   }
 
   *, *::before, *::after { box-sizing: border-box; }
 
-  html, body { height: 100%; }
+  html { height: 100%; }
 
   body {
+    height: 100%;
     margin: 0;
-    background: var(--paper);
-    color: var(--text);
-    font-family: var(--prose);
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
     font-size: var(--t-md);
-    line-height: 1.6;
+    line-height: 1.55;
     -webkit-text-size-adjust: 100%;
-    /* The two panes scroll, not the page. A chat that scrolls the whole window
+    /* The panes scroll, not the page. A chat that scrolls the whole window
        takes the composer off the bottom of the screen with it. */
     overflow: hidden;
   }
 
-  .app {
-    height: 100vh;
-    height: 100dvh;
-    display: grid;
-    grid-template-columns: var(--rail-col) minmax(0, 1fr);
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; border-radius: 2px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
   }
 
+  /* Digits that line up in columns: the readout, the stamps, the rail's stamps. */
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
   /* ---------------------------------------------------------------------
-     The rail: everything you can switch to.
+     Shell
      --------------------------------------------------------------------- */
 
-  .chats {
+  .shell {
+    height: 100%;
+    display: grid;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    transition: grid-template-columns 260ms var(--ease);
+  }
+
+  .shell[data-rail="collapsed"] { grid-template-columns: var(--rail-c) minmax(0, 1fr); }
+
+  /* ---------------------------------------------------------------------
+     The rail — a list, a strip of chips, or a drawer on a phone
+     --------------------------------------------------------------------- */
+
+  .rail {
     display: flex;
     flex-direction: column;
+    min-width: 0;
     min-height: 0;
     background: var(--rail);
     border-right: 1px solid var(--line);
-    font-family: var(--mono);
+    overflow: hidden;
   }
 
-  .chats-head {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.8rem 0.7rem 0.8rem 0.95rem;
-    border-bottom: 1px solid var(--line);
-  }
+  .rail-top { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 0.6rem 0.7rem 0.95rem; }
 
-  .brand {
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.24em;
+  .rail-mark { display: flex; align-items: baseline; gap: 0.5rem; flex: 1; min-width: 0; padding: 0; text-align: left; }
+
+  /* A wordmark that would do nothing when clicked is not a control: see
+     syncRailMark. It keeps its look either way, because it is still the name. */
+  .rail-mark:disabled { cursor: default; }
+
+  .rail-word {
+    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.2em;
     /* The tracking pushes the last letter off-centre; pull it back. */
-    margin-right: -0.24em;
-    color: var(--phosphor);
+    margin-right: -0.2em; color: var(--ink); white-space: nowrap;
   }
 
-  .chats-count {
-    font-size: var(--t-xs);
-    color: var(--faint);
-    /* Sits against the wordmark rather than floating between the two controls,
-       so it reads as part of the title. */
-    margin-left: -0.3rem;
+  /* The two-letter mark that replaces the wordmark when the rail is a strip. */
+  .rail-mono { display: none; font-family: var(--mono); font-size: var(--t-sm); font-weight: 600; letter-spacing: 0.08em; color: var(--ink); }
+
+  .rail-count { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--t-xs); color: var(--faint); }
+
+  .rail-collapse {
+    flex: none; width: 1.75rem; height: 1.75rem;
+    display: grid; place-items: center; border-radius: 4px; color: var(--faint);
+    transition: color 140ms, background 140ms;
   }
 
-  /* Every button in the page: the chat-list controls, the icons and the
-     composer's send/stop. Each rule below keeps only what makes it that
-     control — its type size, colour and padding — so a new button cannot
-     arrive with a slightly different border by accident. Declared before them
-     so those rules still win where specificity is equal. */
-  .chats-new,
-  .chats-toggle,
-  .icon,
-  .composer button {
-    flex: none;
-    font: inherit;
-    background: transparent;
-    border: 1px solid var(--line);
-    cursor: pointer;
+  .rail-collapse:hover { color: var(--ink); background: rgba(233, 226, 210, 0.06); }
+  .rail-collapse svg { transition: transform 260ms var(--ease); }
+
+  .rail-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+  .rail-new {
+    display: flex; align-items: center; gap: 0.6rem;
+    margin: 0 0.6rem 0.6rem; padding: 0.5rem 0.6rem;
+    border: 1px solid var(--line); border-radius: 6px;
+    color: var(--ink); font-size: var(--t-sm); text-align: left;
+    transition: border-color 140ms, background 140ms;
   }
 
-  .chats-new {
-    margin-left: auto;
-    font-size: var(--t-xs);
-    letter-spacing: 0.04em;
-    color: var(--phosphor);
-    padding: 0.2rem 0.5rem;
+  .rail-new:hover:not(:disabled) { border-color: var(--line-2); background: rgba(233, 226, 210, 0.04); }
+  .rail-new:disabled { color: var(--faint); cursor: default; }
+  .rail-new .plus { color: var(--faint); font-family: var(--mono); }
+  .rail-new kbd { margin-left: auto; font-family: var(--mono); font-size: var(--t-xs); color: var(--faint); }
+
+  .rail-search { position: relative; margin: 0 0.6rem 0.5rem; }
+
+  .rail-search .glass { position: absolute; left: 0.55rem; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; display: grid; }
+
+  .rail-search input {
+    width: 100%; font: inherit; font-size: var(--t-sm); color: var(--ink);
+    background: var(--ground); border: 1px solid var(--line); border-radius: 6px;
+    padding: 0.4rem 0.55rem 0.4rem 1.9rem;
   }
 
-  .chats-new:hover:not(:disabled) { border-color: var(--phosphor); }
+  .rail-search input::placeholder { color: var(--faint); }
+  .rail-search input:focus { outline: none; border-color: var(--signal); }
 
-  .chats-new:disabled { color: var(--muted); cursor: default; }
-
-  .chats-body {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-  }
+  .rail-label { padding: 0.4rem 0.95rem 0.25rem; font-size: var(--t-xs); color: var(--faint); }
 
   .chat-list {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    list-style: none;
-    margin: 0;
-    padding: 0.3rem 0;
-    font-size: var(--t-sm);
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    list-style: none; margin: 0; padding: 0 0.6rem 0.6rem;
+    display: flex; flex-direction: column; gap: 1px;
   }
 
-  .chat-row { display: flex; align-items: stretch; }
+  .thread { display: flex; align-items: center; border-radius: 6px; position: relative; }
+  .thread:hover { background: rgba(233, 226, 210, 0.04); }
+  .thread[data-current="true"] { background: rgba(233, 226, 210, 0.05); }
 
-  .chat-row.active { box-shadow: inset 2px 0 0 var(--phosphor); }
+  /* Which chat is open, drawn as a rule against the rail's edge. Carried also by
+     aria-current on the button, which is the part a screen reader can hear. */
+  .thread[data-current="true"]::before {
+    content: ""; position: absolute; left: 0; top: 0.5rem; bottom: 0.5rem;
+    width: 2px; border-radius: 2px; background: var(--signal);
+  }
 
   .chat-open {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    font-size: var(--t-sm);
-    text-align: left;
-    color: var(--muted);
-    background: transparent;
-    border: 0;
-    padding: 0.4rem 0.6rem 0.45rem 0.95rem;
-    cursor: pointer;
-    line-height: 1.4;
+    flex: 1; min-width: 0; display: block;
+    font: inherit; font-size: var(--t-sm); text-align: left; color: var(--dim);
+    padding: 0.4rem 0.5rem 0.45rem 0.55rem; line-height: 1.35;
     /* A title is one line by construction, so it can be cut with an ellipsis
        rather than wrapping and making the rows uneven heights. */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
-  /* The second line of a row — when you last said something in it. It is drawn
-     by the stylesheet from an attribute rather than written into the button,
-     so the button still holds the title and nothing else: the title is what
-     the page tests read back, and what a screen reader announces. */
+  /* The second line of a row — when you last said something in it — and the chip
+     the strip shows instead of a title. Both are drawn by the stylesheet from
+     attributes, so the button holds the title and nothing else: the title is
+     what the page tests read back, and what a screen reader announces. */
   .chat-open[data-when]::after {
     content: attr(data-when);
     display: block;
-    font-size: var(--t-xs);
-    letter-spacing: 0.04em;
-    color: var(--faint);
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-size: var(--t-xs); letter-spacing: 0.04em; color: var(--faint);
   }
 
-  .chat-open:hover:not(:disabled) { color: var(--text); }
-
-  .chat-row.active .chat-open { color: var(--phosphor); }
-
+  .chat-open:hover:not(:disabled) { color: var(--ink); }
+  .thread[data-current="true"] .chat-open { color: var(--ink); }
   .chat-open:disabled { cursor: default; }
 
-  .chat-del {
-    flex: none;
-    font: inherit;
-    font-size: var(--t-sm);
-    color: var(--muted);
-    background: transparent;
-    border: 0;
-    padding: 0 0.6rem;
-    cursor: pointer;
+  .thread-del {
+    flex: none; width: 1.6rem; height: 1.6rem; margin-right: 0.35rem;
+    display: grid; place-items: center; border-radius: 4px;
+    font-size: var(--t-sm); color: var(--faint);
     /* Hidden until the row is pointed at, so the list reads as titles. A phone
        has no hover, so there it is always visible — an affordance you cannot
        reach is worse than a busy row. */
-    opacity: 0;
+    opacity: 0; transition: opacity 140ms, color 140ms, background 140ms;
   }
 
-  .chat-row:hover .chat-del, .chat-del:focus-visible { opacity: 1; }
-
-  .chat-del:hover:not(:disabled) { color: var(--amber); }
+  .thread:hover .thread-del, .thread-del:focus-visible { opacity: 1; }
+  .thread-del:hover:not(:disabled) { color: var(--alarm); background: rgba(201, 96, 63, 0.1); }
 
   @media (hover: none) {
-    .chat-del { opacity: 1; }
+    .thread-del { opacity: 1; }
   }
 
-  .chats-empty {
-    margin: 0;
-    padding: 0.2rem 0.95rem 0.7rem;
-    font-size: var(--t-xs);
-    color: var(--faint);
+  /* Outside the scrolling list on purpose. Inside it, an empty rail would float
+     the line to the bottom of a tall void, a long way from the heading it
+     belongs to. */
+  .threads-empty { margin: 0; padding: 0.2rem 0.95rem 0.7rem; font-size: var(--t-xs); color: var(--faint); }
+  .threads-empty[hidden] { display: none; }
+
+  .rail-foot {
+    border-top: 1px solid var(--line);
+    padding: 0.6rem 0.95rem 0.7rem;
+    font-size: var(--t-xs); line-height: 1.5; color: var(--faint);
   }
 
-  .chats-empty[hidden] { display: none; }
+  .rail-foot b { color: var(--dim); font-weight: 500; }
 
-  /* The scrim goes with the drawer, and is a sibling so the stylesheet can
-     reach it from the rail's own open state. */
-  .scrim { display: none; }
+  /* ---- collapsed: the rail becomes a strip of chips ---- */
+
+  .shell[data-rail="collapsed"] .rail-word,
+  .shell[data-rail="collapsed"] .rail-count,
+  .shell[data-rail="collapsed"] .rail-search,
+  .shell[data-rail="collapsed"] .rail-label,
+  .shell[data-rail="collapsed"] .rail-foot,
+  .shell[data-rail="collapsed"] .threads-empty,
+  .shell[data-rail="collapsed"] .rail-new-label,
+  .shell[data-rail="collapsed"] .rail-new kbd,
+  .shell[data-rail="collapsed"] .thread-del { display: none; }
+
+  .shell[data-rail="collapsed"] .rail-mono { display: block; }
+  .shell[data-rail="collapsed"] .rail-top { flex-direction: column; align-items: center; padding: 0.7rem 0; gap: 0.7rem; }
+  .shell[data-rail="collapsed"] .rail-mark { flex: none; }
+  .shell[data-rail="collapsed"] .rail-collapse svg { transform: rotate(180deg); }
+  .shell[data-rail="collapsed"] .rail-new { justify-content: center; margin-inline: 0.5rem; padding-inline: 0; }
+  .shell[data-rail="collapsed"] .chat-list { padding-inline: 0.5rem; }
+  .shell[data-rail="collapsed"] .thread { justify-content: center; }
+  .shell[data-rail="collapsed"] .thread[data-current="true"]::before { top: 0.35rem; bottom: 0.35rem; }
+
+  /* A strip has no room for a title, so the row is its chip alone. The title is
+     still inside the button — the page tests read it back — so it is taken out
+     of the picture with a font-size of zero rather than removed from the DOM. */
+  .shell[data-rail="collapsed"] .chat-open { font-size: 0; text-align: center; padding-inline: 0; }
+  .shell[data-rail="collapsed"] .chat-open[data-when]::after { display: none; }
+
+  .shell[data-rail="collapsed"] .chat-open::before {
+    content: attr(data-initials);
+    display: block; width: 1.6rem; height: 1.6rem; margin: 0 auto;
+    line-height: 1.6rem; text-align: center;
+    border: 1px solid var(--line); border-radius: 5px; background: var(--raise);
+    font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.02em; color: var(--dim);
+  }
+
+  .shell[data-rail="collapsed"] .thread[data-current="true"] .chat-open::before { color: var(--signal); border-color: var(--signal-soft); }
 
   /* ---------------------------------------------------------------------
-     The column: the conversation.
+     The conversation
      --------------------------------------------------------------------- */
 
-  .main {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-  }
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ground); }
 
-  .topbar {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-    padding: 0.55rem 0.85rem;
-    background: var(--panel);
+  .bar {
+    display: flex; align-items: center; gap: 0.5rem; min-height: 3.25rem;
+    padding: 0.5rem var(--pad);
     border-bottom: 1px solid var(--line);
   }
 
-  .chats-toggle {
-    display: none;
-    font-family: var(--mono);
-    font-size: var(--t-sm);
-    line-height: 1;
-    color: var(--muted);
-    padding: 0.4rem 0.5rem;
+  .drawer-btn { display: none; color: var(--dim); padding: 0.35rem; border-radius: 4px; }
+  .drawer-btn:hover { color: var(--ink); background: rgba(233, 226, 210, 0.06); }
+
+  .bar-title {
+    flex: 1; min-width: 0; margin: 0;
+    font-size: var(--t-md); font-weight: 500; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-
-  .chats-toggle:hover { color: var(--text); border-color: var(--phosphor); }
-
-  .chat-title {
-    flex: 1 1 6rem;
-    min-width: 0;
-    margin: 0;
-    font-family: var(--prose);
-    font-size: 1rem;
-    font-weight: 500;
-    letter-spacing: -0.008em;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Sized to the longest model tag rather than to the room left over. A select
-     stretched across half a laptop screen puts its arrow at the far right edge,
-     a hand's width from the name it belongs to. */
-  .model-pick {
-    flex: 0 1 22rem;
-    display: flex;
-    align-items: stretch;
-    gap: 0.35rem;
-    min-width: 0;
-  }
-
-  .model-pick select {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    color: var(--text);
-    background: var(--paper);
-    border: 1px solid var(--line);
-    padding: 0.3rem 0.4rem;
-  }
-
-  .model-pick select:focus { outline: none; border-color: var(--phosphor); }
-
-  .model-pick select:disabled { color: var(--muted); }
-
-  .icon {
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    color: var(--phosphor);
-    padding: 0 0.55rem;
-  }
-
-  .icon:hover:not(:disabled) { border-color: var(--phosphor); }
-
-  .icon:disabled { color: var(--muted); cursor: default; }
 
   .notice {
     margin: 0;
-    padding: 0.6rem 0.95rem;
+    padding: 0.6rem var(--pad);
     border-bottom: 1px solid var(--line);
-    background: rgba(232, 183, 92, 0.06);
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    line-height: 1.55;
-    color: var(--muted);
+    background: rgba(201, 96, 63, 0.06);
+    font-family: var(--mono); font-size: var(--t-xs); line-height: 1.55;
+    color: var(--dim);
     /* Each warning is its own line; they are stacked rather than replaced so a
        second reason the page is degraded cannot hide the first. */
     white-space: pre-line;
   }
 
-  .notice strong { color: var(--amber); font-weight: 600; }
-
+  .notice strong { color: var(--alarm); font-weight: 600; }
   .notice[hidden] { display: none; }
 
-  .log-wrap {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
+  .transcript-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+
+  .transcript {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding: clamp(1.5rem, 4vh, 2.75rem) var(--pad) 2rem;
   }
 
-  .log {
-    display: flex;
-    flex-direction: column;
-    gap: 1.3rem;
-    max-width: var(--measure);
-    margin: 0 auto;
-    padding: 1.6rem 1.1rem 2.2rem;
-  }
+  .turns { max-width: var(--measure); margin: 0 auto; display: flex; flex-direction: column; gap: clamp(1.5rem, 3.5vh, 2.25rem); }
 
-  /* Written on one line in the markup precisely so this matches: whitespace
-     inside the element would count as content and the rule would never fire. */
-  .log:empty { padding-top: 0; padding-bottom: 0; }
+  .turn { min-width: 0; }
 
-  .turn { display: block; }
-
-  /* A shell prompt for what you typed. Drawn by the stylesheet rather than
-     written into the text, so it can never be sent to the model as part of your
-     message. It is unselectable as well, or selecting your own message to copy
-     it back out would paste the prompt along with it. */
-  .turn.user .md.plain::before {
-    content: "> ";
-    color: var(--phosphor);
-    -webkit-user-select: none;
-    user-select: none;
-  }
-
-  /* Your words in the mono, the model's in the sans. The asymmetry is the
-     point: one side is a terminal line, the other is something to read. */
+  /* Your words: mono, dimmer, held off the margin by a hairline — the one you
+     typed into a machine rather than the one you read. The `> ` a shell prompt
+     would put there is gone; the rule does that job. */
   .turn.user .md.plain {
-    font-family: var(--mono);
-    font-size: 0.875rem;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
+    border-left: 2px solid var(--line-2); padding-left: 0.95rem;
+    font-family: var(--mono); font-size: 0.875rem; line-height: 1.6;
+    color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere;
   }
 
-  /* The reply, marked with the same left rule the notice uses. */
-  .turn.assistant .body {
-    border-left: 2px solid var(--line);
-    padding-left: 1rem;
+  /* The reply: serif, full measure, no container. */
+  .turn.assistant .body .md {
+    font-family: var(--serif); font-size: 1.0625rem; line-height: 1.65; color: var(--ink);
   }
 
-  .body.failed { border-left-color: var(--amber); }
-  .body.failed .md { color: var(--amber); white-space: pre-wrap; }
-
-  /* DeepSeek R1 and friends stream their working-out in a separate field. It
-     is folded away and dimmed because it is reasoning, not the reply — but it
-     has to be shown, or those models look like a long silence followed by an
-     answer that came from nowhere. It is not saved with a chat: the folds are
-     read once, and keeping them would multiply the storage several times over
-     for something already scrolled past. */
-  .think {
-    margin: 0 0 0.7rem;
-    padding-left: 1rem;
-    border-left: 2px solid var(--line);
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    line-height: 1.6;
-    color: var(--muted);
+  .turn.assistant .body.failed .md {
+    font-family: var(--mono); font-size: var(--t-sm); line-height: 1.6;
+    color: var(--alarm); white-space: pre-wrap;
   }
 
-  .think summary { cursor: pointer; list-style: none; }
+  /* Which model wrote this, and how fast it ran on this phone. Only this product
+     would carry that line, and it is the number you actually care about. The
+     rate is only known for a reply that ran in front of you — a chat read back
+     from storage has no timing in it — so a replayed reply is stamped with the
+     model alone. */
+  .stamp { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.9rem; font-family: var(--mono); font-size: var(--t-xs); color: var(--faint); }
+  .stamp .sep { color: var(--line-2); }
+  .turn.assistant.failed .stamp { color: var(--alarm); }
 
+  /* DeepSeek R1 and friends stream their working-out in a separate field. It is
+     folded away and dimmed because it is reasoning, not the reply — but it has
+     to be shown, or those models look like a long silence followed by an answer
+     that came from nowhere. It is not saved with a chat: the folds are read
+     once, and keeping them would multiply the storage several times over for
+     something already scrolled past. */
+  .think { margin: 0 0 1.1rem; padding-left: 0.95rem; border-left: 2px solid var(--line); }
+  .think summary { cursor: pointer; list-style: none; font-family: var(--mono); font-size: var(--t-xs); color: var(--faint); }
   .think summary::-webkit-details-marker { display: none; }
-
   .think summary::before { content: "▸ "; }
-
   .think[open] summary::before { content: "▾ "; }
+  .think summary:hover { color: var(--dim); }
+  .think pre { margin: 0.55rem 0 0; font-family: var(--mono); font-size: var(--t-xs); line-height: 1.65; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
 
-  .think pre {
-    margin: 0.45rem 0 0;
-    font: inherit;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
+  /* The cursor that trails a streaming reply. Deliberately NOT called "caret":
+     that name would belong to a chevron if one came back, and sharing a name
+     between a text cursor and a mark on a control is how one of them ends up
+     wearing the other's block. */
+  .cursor { display: inline-block; width: 0.5em; height: 1em; margin-left: 0.08em; vertical-align: -0.12em; background: var(--signal); animation: blink 1.1s step-end infinite; }
+
+  @keyframes blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0; } }
 
   /* ---------------------------------------------------------------------
      What the model wrote back.
      --------------------------------------------------------------------- */
 
   .md { overflow-wrap: anywhere; }
-
   .md > *:first-child { margin-top: 0; }
-
   .md > *:last-child { margin-bottom: 0; }
-
-  .md p { margin: 0 0 0.85em; }
+  .md p { margin: 0 0 0.9em; }
 
   .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
-    margin: 1.35em 0 0.5em;
-    font-weight: 600;
-    line-height: 1.25;
-    letter-spacing: -0.008em;
-    color: #dbe8e6;
+    margin: 1.4em 0 0.5em; font-weight: 600; line-height: 1.3; letter-spacing: -0.008em;
   }
 
-  .md h1 { font-size: 1.25rem; }
-  .md h2 { font-size: 1.12rem; }
-  .md h3 { font-size: 1rem; }
-  .md h4, .md h5, .md h6 { font-size: 0.94rem; color: var(--text); }
+  .md h1 { font-size: 1.3em; }
+  .md h2 { font-size: 1.15em; }
+  .md h3 { font-size: 1em; }
+  .md h4, .md h5, .md h6 { font-size: 0.94em; }
 
   /* Headings the model wrote are structure inside one reply, so they step down
      from the reply itself rather than competing with the page title above. */
 
-  .md ul, .md ol { margin: 0 0 0.85em; padding-left: 1.35em; }
-
-  .md li { margin: 0.15em 0; }
-
-  .md li > ul, .md li > ol { margin: 0.15em 0; }
-
+  .md ul, .md ol { margin: 0 0 0.9em; padding-left: 1.35em; }
+  .md li { margin: 0.2em 0; }
+  .md li > ul, .md li > ol { margin: 0.2em 0; }
   .md li::marker { color: var(--faint); }
 
   .md-task {
     list-style: none;
-    /* Pulled back out of the list's padding so the box lines up with the
-       markers of the items around it. */
-    margin-left: -1.35em;
-    display: flex;
-    gap: 0.5rem;
-    align-items: baseline;
+    /* Pulled back out of the list's padding so the box lines up with the markers
+       of the items around it. */
+    margin-left: -1.35em; display: flex; gap: 0.5rem; align-items: baseline;
   }
 
-  .md-task input {
-    flex: none;
-    margin: 0;
-    accent-color: var(--phosphor);
-  }
+  .md-task input { flex: none; margin: 0; accent-color: var(--signal); }
 
-  .md blockquote {
-    margin: 0 0 0.85em;
-    padding-left: 1rem;
-    border-left: 2px solid var(--line);
-    color: var(--muted);
-  }
+  .md blockquote { margin: 0 0 0.9em; padding-left: 1rem; border-left: 2px solid var(--line); color: var(--dim); }
 
-  .md hr {
-    margin: 1.4em 0;
-    border: 0;
-    border-top: 1px solid var(--line);
-  }
+  .md hr { margin: 1.4em 0; border: 0; border-top: 1px solid var(--line); }
 
   .md-code {
-    margin: 0 0 1em;
-    padding: 0.7rem 0.85rem;
-    background: var(--code);
-    border: 1px solid var(--line);
+    margin: 0 0 1em; padding: 0.8rem 0.9rem;
+    background: var(--sunk); border: 1px solid var(--line); border-radius: 7px;
     overflow-x: auto;
-    font-family: var(--mono);
-    font-size: var(--t-code);
-    line-height: 1.55;
-    color: var(--text);
-    tab-size: 4;
+    font-family: var(--mono); font-size: var(--t-sm); line-height: 1.6; color: var(--ink);
+    tab-size: 2;
   }
 
   .md-code code { font: inherit; white-space: pre; }
 
-  /* The language, likewise drawn from an attribute rather than written into
-     the block — so the code is still only the code, and copying it does not
-     paste the label in among the first line. */
+  /* The language, likewise drawn from an attribute rather than written into the
+     block — so the code is still only the code, and copying it does not paste
+     the label in among the first line. */
   .md-code[data-lang]::before {
     content: attr(data-lang);
-    display: block;
-    margin-bottom: 0.5rem;
-    font-size: var(--t-xs);
-    letter-spacing: 0.1em;
-    color: var(--faint);
-    -webkit-user-select: none;
-    user-select: none;
+    display: block; margin-bottom: 0.5rem;
+    font-size: var(--t-xs); letter-spacing: 0.1em; color: var(--faint);
+    -webkit-user-select: none; user-select: none;
   }
 
   .md-ic {
-    padding: 0.08em 0.32em;
-    font-family: var(--mono);
-    font-size: 0.86em;
-    color: var(--phosphor);
-    background: var(--code);
-    border: 1px solid var(--line);
+    padding: 0.1em 0.34em;
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--raise); border: 1px solid var(--line); border-radius: 3px;
+    color: var(--ink);
   }
 
-  .md a {
-    color: var(--phosphor);
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 0.18em;
-  }
+  .md a { color: var(--signal); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+  .md strong { font-weight: 600; }
+  .md del { color: var(--dim); }
 
-  .md strong { font-weight: 600; color: #dbe8e6; }
+  .md table { margin: 0 0 1em; border-collapse: collapse; font-size: 0.88em; }
+  .md th, .md td { padding: 0.3rem 0.6rem; border: 1px solid var(--line); text-align: left; }
+  .md th { background: var(--raise); font-weight: 600; }
 
-  .md del { color: var(--muted); }
+  /* ---------------------------------------------------------------------
+     What is on screen before anyone has said anything. It is a sibling of the
+     conversation, not inside it: the log has to stay empty for the page tests to
+     read a cleared conversation as cleared.
+     --------------------------------------------------------------------- */
 
-  .md table {
-    margin: 0 0 1em;
-    border-collapse: collapse;
-    font-size: 0.88em;
-  }
-
-  .md th, .md td {
-    padding: 0.3rem 0.6rem;
-    border: 1px solid var(--line);
-    text-align: left;
-  }
-
-  .md th { background: var(--panel); font-weight: 600; color: #dbe8e6; }
-
-  /* What is on screen before anyone has said anything. It is a sibling of the
-     log, not inside it: the log has to stay empty for the page tests to read
-     a cleared conversation as cleared. */
-  .empty {
-    max-width: var(--measure);
-    margin: 0 auto;
-    padding: 2.6rem 1.1rem 0;
-  }
-
+  .empty { max-width: var(--measure); margin: 0 auto; padding-top: 7vh; }
   .empty[hidden] { display: none; }
+  .empty h2 { margin: 0 0 0.5rem; font-family: var(--serif); font-weight: 500; font-size: 1.5rem; letter-spacing: -0.01em; color: var(--ink); }
+  .empty p { margin: 0 0 1.6rem; color: var(--dim); max-width: 46ch; }
 
-  .empty p {
-    margin: 0;
-    max-width: 44ch;
-    font-size: 0.9rem;
-    color: var(--muted);
+  .starters { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .starters button { padding: 0.7rem 0.2rem; border-bottom: 1px solid var(--line); text-align: left; color: var(--dim); transition: color 140ms, padding-left 140ms; }
+  .starters button:hover { color: var(--ink); padding-left: 0.6rem; }
+
+  /* ---------------------------------------------------------------------
+     Jump to latest — shown only when a reply is arriving off the bottom of the
+     view, so following one is a choice rather than something done to you.
+     --------------------------------------------------------------------- */
+
+  .jump {
+    position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 0.45rem;
+    padding: 0.4rem 0.8rem; background: var(--raise);
+    border: 1px solid var(--line-2); border-radius: 999px;
+    font-size: var(--t-xs); color: var(--ink);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transition: transform 180ms var(--ease);
   }
 
-  .composer {
-    display: flex;
-    align-items: flex-end;
-    gap: 0.5rem;
-    width: calc(100% - 2.2rem);
-    max-width: var(--measure);
+  .jump[hidden] { display: none; }
+  .jump .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--signal); }
+  .jump:hover { transform: translateX(-50%) translateY(-1px); }
+
+  /* ---------------------------------------------------------------------
+     The composer — one surface, ruled like the rest of the page
+
+     The input is a single bordered card rather than a bare field on a bar: it is
+     the one thing you touch constantly, so it should look like an object. The
+     model chooser sits inside it, at the bottom left, because that is where you
+     are standing when you decide who answers; the readout and the send/stop
+     control sit opposite it, which is where your eye already is.
+     --------------------------------------------------------------------- */
+
+  .composer { border-top: 1px solid var(--line); background: var(--ground); }
+
+  /* The measure plus twice the gutter, so that once this element's own padding
+     is taken off, what is left is exactly the width of the text column above —
+     the card's edges land on the same two vertical lines as the prose. Adding a
+     fixed 3.5rem instead only works while the gutter is at its widest, and the
+     card drifts a few pixels wider than the prose on a narrow window. */
+  .composer-inner {
+    max-width: calc(var(--measure) + var(--pad) * 2);
     margin: 0 auto;
-    padding: 0.55rem 0.55rem 0.55rem 0.8rem;
-    background: var(--panel);
-    border: 1px solid var(--line);
+    padding: 0.9rem var(--pad) 1rem;
   }
 
-  /* The box lights up rather than the textarea drawing its own outline, which
+  .input-card {
+    display: flex; flex-direction: column;
+    background: var(--raise);
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    transition: border-color 160ms var(--ease);
+  }
+
+  /* The card lights up rather than the textarea drawing its own outline, which
      would sit awkwardly inside the border. */
-  .composer:focus-within { border-color: var(--phosphor); }
+  .input-card:focus-within { border-color: var(--signal-line); }
 
-  .composer textarea {
-    flex: 1;
-    min-width: 0;
-    resize: none;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 0.9rem;
-    line-height: 1.5;
-    max-height: 40vh;
+  .input-card textarea {
+    display: block; width: 100%;
+    border: 0; background: none; resize: none; outline: none;
+    color: var(--ink); font: inherit; font-size: 0.9rem; line-height: 1.6;
+    padding: 0.8rem 0.9rem 0.15rem;
+    min-height: 2.1rem; max-height: 30vh;
   }
 
-  .composer textarea::placeholder { color: var(--faint); }
+  .input-card textarea::placeholder { color: var(--faint); }
+  /* Read-only while a reply is arriving: readable and selectable, unlike a
+     disabled field, which greys out and says "broken". */
+  .input-card textarea:read-only { color: var(--dim); }
 
-  .composer textarea:focus { outline: none; }
+  .input-row { display: flex; align-items: center; gap: 0.5rem; padding: 0 0.5rem 0.5rem; }
 
-  .composer button {
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    color: var(--phosphor);
-    padding: 0.4rem 0.8rem;
+  /* ---- the model chooser, living at the input ---- */
+
+  .model { position: relative; display: flex; align-items: center; flex: 0 1 auto; min-width: 0; }
+
+  .pick { position: relative; display: flex; align-items: center; min-width: 0; color: var(--dim); }
+
+  /* The mark beside the model. It pulses only while that model is generating. */
+  .pick::before {
+    content: ""; flex: none; width: 5px; height: 5px; margin-right: 0.35rem;
+    border-radius: 50%; background: var(--signal);
   }
 
-  .composer button:hover:not(:disabled) { border-color: var(--phosphor); }
+  .input-card[data-busy="true"] .pick::before { animation: pulse 1.4s ease-in-out infinite; }
 
-  .composer button:disabled { color: var(--muted); cursor: default; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  .composer button[hidden] { display: none; }
-
-  .status {
-    width: calc(100% - 2.2rem);
-    max-width: var(--measure);
-    margin: 0.4rem auto 0.7rem;
-    min-height: 1.2em;
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    color: var(--muted);
+  /* The chevron is a rotated corner rather than an icon: a native select cannot
+     hold children, and the alternative — a custom listbox — would cost a phone
+     the picker it already knows how to open. */
+  .pick::after {
+    content: ""; position: absolute; right: 0.45rem; top: 50%;
+    width: 0.3rem; height: 0.3rem;
+    border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+    transform: translateY(-70%) rotate(45deg); pointer-events: none;
   }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border: 0;
+  .pick select {
+    appearance: none; -webkit-appearance: none;
+    flex: 0 1 auto; min-width: 0; max-width: min(15rem, 42vw);
+    font: inherit; font-family: var(--mono); font-size: var(--t-xs);
+    color: inherit; background: none; border: 0; border-radius: 6px;
+    padding: 0.32rem 1.1rem 0.32rem 0.5rem;
+    cursor: pointer; text-overflow: ellipsis;
+    transition: color 140ms, background 140ms;
   }
 
-  :focus-visible {
-    outline: 2px solid var(--phosphor);
-    outline-offset: 3px;
+  .pick select:hover, .pick select:focus { color: var(--ink); background: rgba(233, 226, 210, 0.07); outline: none; }
+  .pick select:disabled { color: var(--faint); cursor: default; }
+
+  .icon {
+    flex: none; display: grid; place-items: center;
+    width: 1.6rem; height: 1.6rem; border-radius: 5px;
+    font-family: var(--mono); font-size: var(--t-sm);
+    color: var(--faint);
+    transition: color 140ms, background 140ms;
   }
 
-  .cursor {
-    display: inline-block;
-    width: 0.55em;
-    height: 1em;
-    margin-left: 0.2em;
-    background: var(--phosphor);
-    vertical-align: text-bottom;
-    animation: blink 1.15s step-end infinite;
+  .icon:hover:not(:disabled) { color: var(--ink); background: rgba(233, 226, 210, 0.07); }
+  .icon:disabled { color: var(--line-2); cursor: default; }
+
+  .composer-side { margin-left: auto; display: flex; align-items: center; gap: 0.7rem; }
+
+  /* Instrumentation, inline in the composer rather than a line of text under it:
+     while a reply arrives this is what the phone is doing — how fast, how long. */
+  .readout { display: flex; align-items: baseline; gap: 0.7rem; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--t-xs); color: var(--faint); }
+  .readout[hidden] { display: none; }
+  .readout .rate { color: var(--signal); }
+  .readout .unit { margin-left: 0.15em; }
+
+  .send {
+    display: flex; align-items: center; gap: 0.45rem;
+    padding: 0.4rem 0.75rem; min-height: 2rem; border-radius: 7px;
+    background: rgba(233, 226, 210, 0.09); font-size: var(--t-sm); color: var(--ink);
+    transition: background 140ms, color 140ms;
   }
 
-  @keyframes blink {
-    0%, 60%   { opacity: 1; }
-    61%, 100% { opacity: 0; }
-  }
+  .send:hover:not(:disabled) { background: rgba(233, 226, 210, 0.16); }
+  .send:disabled { color: var(--faint); background: rgba(233, 226, 210, 0.04); cursor: default; }
+  .send[hidden] { display: none; }
+  .send.stop { color: var(--signal); background: var(--signal-soft); }
+  .send.stop:hover { background: rgba(207, 166, 58, 0.26); }
+  .stop-mark { width: 7px; height: 7px; border-radius: 1px; background: currentColor; flex: none; }
 
-  /* On a phone the rail is a drawer over the conversation. A drawer, not a
-     panel above it: the list is the thing you switch with, and giving it the
-     top third of a phone screen costs more than it returns. */
+  /* ---------------------------------------------------------------------
+     A phone: the rail is a drawer over the conversation. A drawer, not a panel
+     above it: the list is the thing you switch with, and giving it the top
+     third of a phone screen costs more than it returns.
+     --------------------------------------------------------------------- */
+
+  .scrim { display: none; }
+
   @media (max-width: 60rem) {
-    .app { grid-template-columns: minmax(0, 1fr); }
+    .shell, .shell[data-rail="collapsed"] { grid-template-columns: minmax(0, 1fr); }
 
-    .chats {
-      position: fixed;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      z-index: 10;
-      width: min(19rem, 84vw);
+    .rail {
+      position: fixed; inset: 0 auto 0 0; z-index: 30;
+      width: min(18.5rem, 86vw);
       transform: translateX(-100%);
-      transition: transform 0.18s ease;
+      transition: transform 240ms var(--ease);
+      border-right-color: var(--line-2);
+      box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
     }
 
-    .chats.open { transform: none; }
+    .rail[data-open="true"] { transform: none; }
+
+    /* In the drawer there is nothing to collapse to, so the toggle is a close. */
+    .rail-collapse svg { transform: rotate(180deg); }
 
     .scrim {
-      position: fixed;
-      inset: 0;
-      z-index: 9;
-      background: rgba(0, 0, 0, 0.55);
+      display: block; position: fixed; inset: 0; z-index: 29;
+      background: rgba(6, 6, 5, 0.6); opacity: 0; pointer-events: none;
+      transition: opacity 240ms var(--ease);
     }
 
-    .chats.open + .scrim { display: block; }
+    .scrim[data-open="true"] { opacity: 1; pointer-events: auto; }
 
-    .chats-toggle { display: block; }
-
-    /* The picker takes its own row rather than being squeezed against the
-       title, which on a phone would leave neither of them readable. */
-    .model-pick { flex-basis: 100%; }
+    .drawer-btn { display: block; }
+    .bar { min-height: 3rem; }
+    .composer-inner { padding-bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px)); }
+    .input-card textarea { font-size: 1rem; }   /* 16px keeps iOS from zooming on focus */
+    .pick select { padding-block: 0.45rem; max-width: min(15rem, 55vw); }
+    .send { min-height: 2.5rem; padding-inline: 0.9rem; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .chats { transition: none; }
-    .cursor { animation: none; }
+    .shell, .rail, .scrim, .rail-collapse svg, .jump, .input-card { transition: none; }
+    .cursor, .input-card[data-busy="true"] .pick::before { animation: none; }
   }
 </style>
 </head>
 <body>
-  <div class="app">
-    <!-- The rail. On a phone it is the drawer; on anything wider it is the
-         left column and is always there. Either way it is first in the
-         document, so tabbing reaches the list before the conversation. -->
-    <nav class="chats" id="chats" aria-label="Saved chats">
-      <div class="chats-head">
-        <span class="brand">MOMOS</span>
-        <span class="chats-count" id="chats-label"></span>
-        <button type="button" class="chats-new" id="new-chat">+ new</button>
+  <div class="shell" id="shell" data-rail="expanded">
+    <!-- The rail. On a phone it is the drawer; on anything wider it is the left
+         column and is always there. Either way it is first in the document, so
+         tabbing reaches the list before the conversation. -->
+    <nav class="rail" id="chats" aria-label="Saved chats">
+      <div class="rail-top">
+        <button type="button" class="rail-mark" id="rail-mark" title="MOMOS">
+          <span class="rail-word">MOMOS</span>
+          <span class="rail-mono">MO</span>
+          <span class="rail-count" id="chats-label"></span>
+        </button>
+        <button type="button" class="rail-collapse" id="rail-collapse"
+                aria-expanded="true" aria-controls="rail-body"
+                aria-label="Collapse chat list">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
-      <!-- Outside the scrolling list on purpose. Inside it, an empty rail would
-           float the line to the bottom of a tall void, a long way from the
-           heading it belongs to. -->
-      <p class="chats-empty" id="chats-empty">no saved chats</p>
-      <div class="chats-body" id="chats-body">
+
+      <div class="rail-body" id="rail-body">
+        <button type="button" class="rail-new" id="new-chat">
+          <span class="plus" aria-hidden="true">+</span>
+          <span class="rail-new-label">New chat</span>
+          <kbd>N</kbd>
+        </button>
+
+        <div class="rail-search">
+          <span class="glass" aria-hidden="true">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/>
+              <path d="m10.2 10.2 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <label class="sr-only" for="chat-search">Search chats</label>
+          <input id="chat-search" type="search" placeholder="Search chats" autocomplete="off">
+        </div>
+
+        <p class="rail-label">Recent</p>
+        <p class="threads-empty" id="chats-empty">no saved chats</p>
         <ul class="chat-list" id="chat-list"></ul>
       </div>
+
+      <div class="rail-foot"><b>Saved in this browser.</b> Clearing site data clears them.</div>
     </nav>
 
     <!-- The drawer's backdrop. A sibling of the rail so the sheet can reach it
          from the rail's own open state, with no script involved. -->
-    <div class="scrim"></div>
+    <div class="scrim" id="scrim"></div>
 
     <main class="main">
-      <header class="topbar">
-        <button type="button" class="chats-toggle" id="chats-toggle"
-                aria-expanded="false" aria-controls="chats-body"
-                aria-label="Saved chats">☰</button>
-        <h1 class="chat-title" id="chat-title">New chat</h1>
-        <div class="model-pick">
-          <label class="sr-only" for="model">Model</label>
-          <select id="model"></select>
-          <button type="button" class="icon" id="reload-models"
-                  title="Reload the model list"
-                  aria-label="Reload the model list">↻</button>
-        </div>
+      <header class="bar">
+        <button type="button" class="drawer-btn" id="chats-toggle"
+                aria-expanded="false" aria-controls="rail-body"
+                aria-label="Open chat list">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M3 6h14M3 10h14M3 14h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <h1 class="bar-title" id="chat-title">New chat</h1>
       </header>
 
       <p class="notice" id="banner" hidden></p>
 
-      <div class="log-wrap" id="log-wrap">
-        <!-- aria-live is off on the log on purpose. A polite live region over a
-             token-by-token stream reads every fragment aloud, which is
-             unusable. Arrivals and state changes are announced through #status
-             instead. Written as one line so the stylesheet's `:empty` rule can
-             match it. -->
-        <div class="log" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
+      <div class="transcript-wrap">
+        <div class="transcript" id="transcript">
+          <!-- aria-live is off on the conversation on purpose. A polite live
+               region over a token-by-token stream reads every fragment aloud,
+               which is unusable. Arrivals and state changes are announced
+               through #status instead. Written as one line so nothing can
+               accidentally become content. -->
+          <div class="turns" id="log" role="log" aria-live="off" aria-label="Conversation"></div>
 
-        <div class="empty" id="empty" hidden>
-          <p>Nothing here yet. Type below to start a chat.</p>
+          <div class="empty" id="empty" hidden>
+            <h2>Ask the phone something.</h2>
+            <p>One model stays in memory between turns. Longer questions get slower answers, not worse ones.</p>
+            <div class="starters">
+              <button type="button" data-ask="Which model fits in 4 GB of RAM?">Which model fits in 4 GB of RAM?</button>
+              <button type="button" data-ask="Why does my phone kill ollama when I switch apps?">Why does my phone kill ollama when I switch apps?</button>
+              <button type="button" data-ask="Explain the KV cache in one paragraph.">Explain the KV cache in one paragraph</button>
+            </div>
+          </div>
         </div>
+
+        <button type="button" class="jump" id="jump" hidden>
+          <span class="dot" aria-hidden="true"></span> Jump to latest
+        </button>
       </div>
 
       <form class="composer" id="composer" autocomplete="off">
-        <label class="sr-only" for="prompt">Message</label>
-        <textarea id="prompt" rows="1" spellcheck="false"
-                  placeholder="ask something"></textarea>
-        <button type="submit" id="send">Send</button>
-        <button type="button" id="stop" hidden>Stop</button>
+        <div class="composer-inner">
+          <div class="input-card" id="input-card" data-busy="false">
+            <label class="sr-only" for="prompt">Message</label>
+            <textarea id="prompt" rows="1" spellcheck="false" placeholder="Ask something"></textarea>
+
+            <div class="input-row">
+              <div class="model">
+                <span class="pick">
+                  <label class="sr-only" for="model">Model</label>
+                  <select id="model"></select>
+                </span>
+                <button type="button" class="icon" id="reload-models"
+                        title="Reload the model list"
+                        aria-label="Reload the model list">↻</button>
+              </div>
+
+              <div class="composer-side">
+                <span class="readout" id="readout" hidden>
+                  <span><span class="rate num" id="ro-rate">0</span><span class="unit">tok/s</span></span>
+                  <span class="num" id="ro-time">0.0s</span>
+                </span>
+                <button class="send" id="send" type="submit">Send</button>
+                <button class="send stop" id="stop" type="button" hidden>
+                  <span class="stop-mark" aria-hidden="true"></span>Stop
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </form>
 
-      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="sr-only" id="status" role="status" aria-live="polite"></p>
     </main>
   </div>
 
@@ -790,8 +840,8 @@
     (function () {
       'use strict';
 
-      var logEl = document.getElementById('log');
-      var wrapEl = document.getElementById('log-wrap');
+      var turnsEl = document.getElementById('log');
+      var transcriptEl = document.getElementById('transcript');
       var emptyEl = document.getElementById('empty');
       var chatTitle = document.getElementById('chat-title');
       var form = document.getElementById('composer');
@@ -808,6 +858,16 @@
       var chatsLabel = document.getElementById('chats-label');
       var chatsToggle = document.getElementById('chats-toggle');
       var newChatBtn = document.getElementById('new-chat');
+      var shellEl = document.getElementById('shell');
+      var railCollapse = document.getElementById('rail-collapse');
+      var railMark = document.getElementById('rail-mark');
+      var searchEl = document.getElementById('chat-search');
+      var scrimEl = document.getElementById('scrim');
+      var inputCard = document.getElementById('input-card');
+      var jumpBtn = document.getElementById('jump');
+      var readoutEl = document.getElementById('readout');
+      var roRate = document.getElementById('ro-rate');
+      var roTime = document.getElementById('ro-time');
 
       var PORT = 11434;   // replaced by whatever runtime.json says
       var BASE = null;
@@ -823,7 +883,13 @@
       var controller = null;
       var current = null;      // the reply being streamed
 
-      // --- store:begin ---
+      // The one preference the page keeps outside the chats: whether the rail is
+      // a list or a strip. Read and written behind a try/catch of its own,
+      // because it is a convenience and a browser that refuses storage must
+      // still get a working page.
+      var RAIL_KEY = 'momos.rail';
+
+// --- store:begin ---
       // Everything between these markers is free of the DOM, window and fetch:
       // tests/test-ui-store.sh extracts this block and runs it under node
       // against a stub storage. Keep it that way, or that test stops meaning
@@ -1004,7 +1070,7 @@
       }
       // --- store:end ---
 
-      // --- markdown:begin ---
+// --- markdown:begin ---
       // What the model wrote back, rendered.
       //
       // It is hand-written and small because the page ships with no
@@ -1571,6 +1637,24 @@
         return null;
       }
 
+      // What a thread row shows when the rail is a strip too narrow for a title.
+      // Two letters at most, because a chip is 1.6rem across; a title that is
+      // one word gives up its first two letters rather than one, so "Kubernetes"
+      // is not the same chip as "Kv".
+      function initials(title) {
+        var words = String(title || '').split(/\s+/), out = '';
+        for (var i = 0; i < words.length && out.length < 2; i++) {
+          var w = words[i];
+          if (!w) continue;
+          // A word that opens with a quote or a bracket is initialled on the
+          // letter inside it, which is the one a person would pick.
+          var first = w.replace(/^[^\p{L}\p{N}]+/u, '');
+          if (!first) continue;
+          out += out ? first.slice(0, 1) : first.slice(0, 2);
+        }
+        return out.toUpperCase() || '··';
+      }
+
       // The model a request would go to right now: the open chat's, or the one
       // picked for a chat that has not been started yet.
       function currentModel() {
@@ -1587,22 +1671,82 @@
         }
       }
 
+      function clearNode(node) {
+        while (node.firstChild) node.removeChild(node.firstChild);
+      }
+
+      function mkEl(tag, cls) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        return n;
+      }
+
+      function mkSpan(cls, txt) {
+        var s = mkEl('span', cls);
+        s.appendChild(document.createTextNode(txt));
+        return s;
+      }
+
+      // ---- following the reply ----
+
       // Only follow the reply if you were already at the bottom. Yanking the
       // view down while somebody is reading back through a long answer is the
       // thing that makes a chat page feel like it is fighting you.
       function nearBottom() {
-        var gap = wrapEl.scrollHeight - wrapEl.scrollTop - wrapEl.clientHeight;
+        var gap = transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight;
         return !(gap > 80);   // an unmeasurable pane counts as being at the end
       }
 
       function scrollToEnd(force) {
         if (!force && !nearBottom()) return;
-        wrapEl.scrollTop = wrapEl.scrollHeight;
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        updateJump();
       }
 
-      function clearNode(node) {
-        while (node.firstChild) node.removeChild(node.firstChild);
+      function updateJump() {
+        jumpBtn.hidden = nearBottom();
       }
+
+      // ---- the rail's own state ----
+
+      function railCollapsed() {
+        return shellEl.getAttribute('data-rail') === 'collapsed';
+      }
+
+      function setRailCollapsed(collapsed) {
+        shellEl.setAttribute('data-rail', collapsed ? 'collapsed' : 'expanded');
+        railCollapse.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        railCollapse.setAttribute('aria-label',
+          collapsed ? 'Expand chat list' : 'Collapse chat list');
+        syncRailMark();
+        try {
+          window.localStorage.setItem(RAIL_KEY, collapsed ? 'collapsed' : 'expanded');
+        } catch (e) { /* a preference, not a chat: losing it costs nothing */ }
+      }
+
+      function drawerOpen() {
+        return chatsEl.getAttribute('data-open') === 'true';
+      }
+
+      function setDrawerOpen(open) {
+        chatsEl.setAttribute('data-open', open ? 'true' : 'false');
+        scrimEl.setAttribute('data-open', open ? 'true' : 'false');
+        chatsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        syncRailMark();
+        // Focus the drawer's primary action, not the wordmark, so the ring lands
+        // on something useful rather than the logo.
+        if (open) newChatBtn.focus();
+      }
+
+      // The wordmark opens a collapsed rail and closes an open drawer, which
+      // are the two states in which tapping it means something. In the third —
+      // a rail that is simply there — it is a label, so it is disabled rather
+      // than left as a button that swallows a click and a tab stop.
+      function syncRailMark() {
+        railMark.disabled = !railCollapsed() && !drawerOpen();
+      }
+
+      // ---- the conversation ----
 
       // Text goes in as a text node, never as markup. Model output reaches the
       // page either through here or through mdToDom, and both of them end in
@@ -1613,42 +1757,58 @@
       }
 
       function addTurn(role) {
-        var turn = document.createElement('article');
-        turn.className = 'turn ' + role;
-
-        var body = document.createElement('div');
-        body.className = 'body';
+        var turn = mkEl('article', 'turn ' + role);
+        var body = mkEl('div', 'body');
 
         // Everything the turn says lives in here and is replaced wholesale
         // whenever the Markdown is re-rendered.
-        var answer = document.createElement('div');
-        answer.className = 'md';
+        var answer = mkEl('div', 'md');
 
         body.appendChild(answer);
         turn.appendChild(body);
-        logEl.appendChild(turn);
+        turnsEl.appendChild(turn);
         renderEmpty();
 
         return {
           turn: turn, body: body, answer: answer,
-          think: null, caret: null, caretOn: false, text: '', failed: false
+          think: null, caret: null, caretOn: false, text: '', failed: false,
+          startedAt: 0, chunks: 0, evalCount: 0, evalSeconds: 0
         };
       }
 
       function clearLog() {
-        clearNode(logEl);
+        clearNode(turnsEl);
         renderEmpty();
       }
 
-      // Before anything has been said. It sits outside the log, because the log
-      // has to stay genuinely empty for a cleared conversation to read as one.
+      // Before anything has been said. It sits outside the conversation, because
+      // the log has to stay genuinely empty for a cleared conversation to read
+      // as one.
       function renderEmpty() {
-        emptyEl.hidden = logEl.childNodes.length > 0;
+        emptyEl.hidden = turnsEl.childNodes.length > 0;
       }
 
       function renderHead() {
         var s = activeSession();
         chatTitle.textContent = s ? (s.title || 'untitled') : 'New chat';
+      }
+
+      // Which model wrote this reply, and how fast it ran. The rate is only
+      // known for a reply that ran in front of you — a replayed one is stamped
+      // with the model alone rather than with a number nobody measured.
+      function stamp(t, model, rate) {
+        var s = mkEl('div', 'stamp');
+        s.appendChild(mkSpan('num', model || 'no model'));
+        if (rate) {
+          s.appendChild(mkSpan('sep', '/'));
+          s.appendChild(mkSpan('num', rate));
+        }
+        t.turn.appendChild(s);
+      }
+
+      function rateLabel(t) {
+        if (!t || !t.evalCount || !t.evalSeconds) return '';
+        return Math.round(t.evalCount / t.evalSeconds) + ' tok/s';
       }
 
       // How far into the last block the caret can go before it would land on a
@@ -1671,8 +1831,7 @@
         if (t.caret && t.caret.parentNode) t.caret.parentNode.removeChild(t.caret);
         t.caret = null;
         if (!t.caretOn) return;
-        t.caret = document.createElement('span');
-        t.caret.className = 'cursor';
+        t.caret = mkEl('span', 'cursor');
         t.caret.setAttribute('aria-hidden', 'true');
         caretHost(t).appendChild(t.caret);
       }
@@ -1709,8 +1868,7 @@
       // any, so models without one never show an empty box.
       function thinkingSink(t) {
         if (t.think) return t.think;
-        var det = document.createElement('details');
-        det.className = 'think';
+        var det = mkEl('details', 'think');
         var sum = document.createElement('summary');
         sum.textContent = 'reasoning';
         var pre = document.createElement('pre');
@@ -1719,6 +1877,14 @@
         t.turn.insertBefore(det, t.body);
         t.think = pre;
         return pre;
+      }
+
+      // What the phone is doing, shown in the composer while it does it. The
+      // chunk count is the token count: ollama streams one object per token.
+      function updateReadout(t) {
+        var elapsed = Math.max((Date.now() - t.startedAt) / 1000, 0.05);
+        roTime.textContent = elapsed.toFixed(1) + 's';
+        roRate.textContent = String(Math.round(t.chunks / elapsed));
       }
 
       function handleLine(line) {
@@ -1747,12 +1913,20 @@
           }
           if (obj.message.content) {
             current.text += obj.message.content;
+            current.chunks++;
             paint(current);
+            updateReadout(current);
           }
           scrollToEnd();
         }
 
-        if (obj.done) hideCaret(current);
+        if (obj.done) {
+          // The real count, when the server gives one, rather than an estimate
+          // made from the text: the stamp is a measurement or it is nothing.
+          if (obj.eval_count) current.evalCount = obj.eval_count;
+          if (obj.eval_duration) current.evalSeconds = obj.eval_duration / 1e9;
+          hideCaret(current);
+        }
       }
 
       // Ollama declares only a 200 in its spec but does return {"error": ...}
@@ -1793,6 +1967,7 @@
         current.answer.className = 'md plain';
         current.answer.textContent = msg;
         current.body.className = 'body failed';
+        current.turn.className = 'turn assistant failed';
         setStatus('failed');
         scrollToEnd(true);
       }
@@ -1852,9 +2027,18 @@
       function setGenerating(busy) {
         generating = busy;
         sendBtn.disabled = busy || !currentModel();
+        // Send and Stop are two buttons sharing one slot, rather than one button
+        // that changes meaning: the label a person reads is the action they get.
+        sendBtn.hidden = busy;
         stopBtn.hidden = !busy;
         newChatBtn.disabled = busy;
-        modelSel.disabled = busy || !modelSel.options.length;
+        modelSel.disabled = busy || !modelNames().length;
+        // Read-only, not disabled: the message stays selectable while the model
+        // is answering, and an empty composer does not look broken.
+        input.readOnly = busy;
+        readoutEl.hidden = !busy;
+        inputCard.setAttribute('data-busy', busy ? 'true' : 'false');
+        inputCard.setAttribute('aria-busy', busy ? 'true' : 'false');
         var rows = chatList.getElementsByTagName('button');
         for (var i = 0; i < rows.length; i++) rows[i].disabled = busy;
       }
@@ -1887,7 +2071,10 @@
         syncModelSelect();
 
         current = addTurn('assistant');
+        current.startedAt = Date.now();
         showCaret(current);
+        roRate.textContent = '0';
+        roTime.textContent = '0.0s';
         setGenerating(true);
         setStatus('generating');
         scrollToEnd(true);
@@ -1924,11 +2111,12 @@
             // Runs after success, failure and stop alike. Whatever text did
             // arrive is a real turn, and dropping it would leave the model's
             // context and the screen disagreeing.
-            hideCaret(current);
             if (current && current.text) {
+              hideCaret(current);
               session.messages.push({ role: 'assistant', content: current.text });
               touch(session);
               persist();
+              stamp(current, session.model, rateLabel(current));
             }
             current = null;
             controller = null;
@@ -1951,15 +2139,10 @@
 
       function autosize() {
         input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px';
+        input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.3) + 'px';
       }
 
       // ---- the chat list ----
-
-      function setChatsOpen(open) {
-        chatsEl.className = open ? 'chats open' : 'chats';
-        chatsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      }
 
       function updateChatsLabel() {
         var n = STORE.sessions.length;
@@ -1967,29 +2150,32 @@
       }
 
       function chatRow(session) {
-        var li = document.createElement('li');
-        li.className = session.id === STORE.current ? 'chat-row active' : 'chat-row';
+        var li = mkEl('li', 'thread');
+        li.setAttribute('data-id', session.id);
+        li.setAttribute('data-current', session.id === STORE.current ? 'true' : 'false');
 
         var title = session.title || 'untitled';
 
         var open = document.createElement('button');
         open.type = 'button';
         open.className = 'chat-open';
-        // The title and nothing else. When the row was last used is carried in
-        // an attribute, which the stylesheet draws as a second line.
+        // The title and nothing else. When the row was last used, and the chip a
+        // collapsed rail shows instead of it, are carried in attributes that the
+        // stylesheet draws — so the button's text is still just the title.
         open.textContent = title;
         var when = whenLabel(session.updated, Date.now());
         if (when) open.setAttribute('data-when', when);
+        open.setAttribute('data-initials', initials(title));
+        open.title = title + '\n' + (session.model || 'no model') +
+          ' · ' + session.messages.length + ' messages';
         // Which chat is open is carried by aria-current rather than by the
         // colour alone, which is the part of it a screen reader can hear.
         if (session.id === STORE.current) open.setAttribute('aria-current', 'true');
-        open.title = title + '\n' + (session.model || 'no model') +
-          ' · ' + session.messages.length + ' messages';
         open.addEventListener('click', function () { openSession(session.id); });
 
         var del = document.createElement('button');
         del.type = 'button';
-        del.className = 'chat-del';
+        del.className = 'thread-del';
         del.textContent = '×';
         del.setAttribute('aria-label', 'Delete chat: ' + title);
         del.addEventListener('click', function () { deleteSession(session.id); });
@@ -2005,17 +2191,34 @@
         // order until a chat that is already in it is spoken to again, and
         // re-ordering the array on every turn would move rows under the cursor.
         var ordered = byRecency(STORE.sessions);
+        var query = (searchEl.value || '').trim().toLowerCase();
+        var shown = 0;
         for (var i = 0; i < ordered.length; i++) {
+          if (query && ordered[i].title.toLowerCase().indexOf(query) === -1) continue;
           chatList.appendChild(chatRow(ordered[i]));
+          shown++;
         }
-        chatEmpty.hidden = STORE.sessions.length > 0;
+
+        // "Nothing stored" and "nothing matching" are different facts, and a
+        // filter that hid every row without saying why reads as a lost chat.
+        if (!STORE.sessions.length) {
+          chatEmpty.textContent = 'no saved chats';
+          chatEmpty.hidden = false;
+        } else if (!shown) {
+          chatEmpty.textContent = 'no chats match that';
+          chatEmpty.hidden = false;
+        } else {
+          chatEmpty.hidden = true;
+        }
+
         updateChatsLabel();
         renderHead();
         setGenerating(generating);   // freshly built rows arrive enabled
       }
 
-      // A restored chat shows the question and the reply. It does not show the
-      // reasoning folds or the caret, because neither was saved.
+      // A restored chat shows the question and the reply, and the model that
+      // wrote each reply. It does not show the reasoning folds, the caret or the
+      // rate, because none of them were saved.
       function replay(session) {
         clearLog();
         for (var i = 0; i < session.messages.length; i++) {
@@ -2027,6 +2230,7 @@
           } else {
             t.text = m.content;
             paint(t);
+            stamp(t, session.model, '');
           }
         }
         renderEmpty();
@@ -2042,7 +2246,7 @@
         persist();
         renderChats();
         syncModelSelect();
-        if (closeRail) setChatsOpen(false);
+        if (closeRail) setDrawerOpen(false);
         setStatus(status);
         input.focus();
       }
@@ -2138,7 +2342,13 @@
         }
 
         if (cur) modelSel.value = cur;
-        modelSel.disabled = generating || !cur;
+        // Disabled while a reply is arriving, and when there is nothing real to
+        // choose. That second case is the list holding only the "no model
+        // installed" placeholder. A page that can see models but has none
+        // chosen — a fresh install, before `momos chat` has recorded one —
+        // leaves the picker live, so the choice can be made here rather than
+        // sending anyone back to Termux to make it.
+        modelSel.disabled = generating || !names.length;
         renderHead();
       }
 
@@ -2194,25 +2404,43 @@
           draftModel = picked;
           renderHead();
         }
+        // Redraw the composer's gating too: Send stays disabled until there is
+        // a model, and a draft that has just been given one has to be able to
+        // send without waiting for something else to happen.
+        setGenerating(generating);
         setStatus(picked);
         input.focus();
       });
 
       reloadBtn.addEventListener('click', function () { fetchModels(); });
 
-      chatsToggle.addEventListener('click', function () {
-        setChatsOpen(chatsEl.className.indexOf('open') === -1);
+      railCollapse.addEventListener('click', function () {
+        setRailCollapsed(!railCollapsed());
       });
+
+      railMark.addEventListener('click', function () {
+        if (drawerOpen()) {
+          // Closing from here takes the focus with it — the mark is about to be
+          // disabled again — so hand it to the control that can reopen the
+          // drawer rather than dropping it on the document.
+          setDrawerOpen(false);
+          chatsToggle.focus();
+          return;
+        }
+        if (railCollapsed()) setRailCollapsed(false);
+      });
+
+      chatsToggle.addEventListener('click', function () { setDrawerOpen(!drawerOpen()); });
+
+      scrimEl.addEventListener('click', function () { setDrawerOpen(false); });
 
       newChatBtn.addEventListener('click', newChat);
 
-      // On a phone the rail covers the conversation, so escape closes it.
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && chatsEl.className.indexOf('open') !== -1) {
-          setChatsOpen(false);
-          chatsToggle.focus();
-        }
-      });
+      searchEl.addEventListener('input', renderChats);
+
+      transcriptEl.addEventListener('scroll', updateJump);
+
+      jumpBtn.addEventListener('click', function () { scrollToEnd(true); updateJump(); });
 
       form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -2221,9 +2449,10 @@
 
       // Enter sends and Shift+Enter breaks the line, which is what every chat
       // box does; the exception is a phone keyboard, where Enter is the only
-      // key there is.
+      // key there is. isComposing keeps an IME's Enter from sending a
+      // half-typed word.
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
           e.preventDefault();
           submit();
         }
@@ -2234,6 +2463,35 @@
       stopBtn.addEventListener('click', function () {
         if (controller) controller.abort();
       });
+
+      function isTyping() {
+        var a = document.activeElement;
+        return !!a && !!a.tagName && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+      }
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          // On a phone the rail covers the conversation, so escape closes it.
+          if (drawerOpen()) { setDrawerOpen(false); chatsToggle.focus(); }
+          return;
+        }
+        if (!e.key) return;
+        var key = e.key.toLowerCase();
+        if ((e.metaKey || e.ctrlKey) && key === 'k') { e.preventDefault(); input.focus(); return; }
+        if (!isTyping() && !e.metaKey && !e.ctrlKey && key === 'n') { e.preventDefault(); newChat(); }
+      });
+
+      // A starter is a question with the typing already done.
+      var starters = emptyEl.getElementsByTagName('button');
+      for (var s = 0; s < starters.length; s++) {
+        (function (btn) {
+          btn.addEventListener('click', function () {
+            input.value = btn.getAttribute('data-ask') || '';
+            autosize();
+            submit();
+          });
+        })(starters[s]);
+      }
 
       function openStorage() {
         try {
@@ -2250,12 +2508,19 @@
         try { return s.getItem(STORE_KEY); } catch (e) { return null; }
       }
 
+      function readRailPref() {
+        try { return window.localStorage.getItem(RAIL_KEY); } catch (e) { return null; }
+      }
+
       function init(cfg) {
         if (cfg && typeof cfg.ollama_port === 'number') PORT = cfg.ollama_port;
         BASE = baseUrl(location.hostname, PORT);
 
         DEFAULT_MODEL = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
         draftModel = DEFAULT_MODEL;
+
+        if (readRailPref() === 'collapsed') setRailCollapsed(true);
+        syncRailMark();
 
         storage = openStorage();
         if (storage) {
@@ -2275,14 +2540,15 @@
         renderChats();
         syncModelSelect();
         renderEmpty();
+        updateJump();
 
         if (!currentModel()) {
           // The launcher writes runtime.json from the last-used model. Until one
           // has been chosen there is nothing to talk to, and saying so is better
           // than a request that fails with a server error. The saved chats are
           // still readable, which is why this no longer returns early.
-          warn('No model chosen yet. In Termux run `momos chat <model>` once, ' +
-               'then reload this page.');
+          warn('No model chosen yet. Pick one in the box below, or run ' +
+               '`momos chat <model>` in Termux once to set the default.');
           setStatus('no model');
         }
 

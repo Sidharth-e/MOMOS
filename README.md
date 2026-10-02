@@ -175,17 +175,25 @@ over the network would be the one thing on it that fails when the phone is
 offline. It covers what a small model actually writes and shows anything else as
 plain text rather than guessing.
 
+![The MOMOS web UI on a laptop](assets/desktop.png)
+
+![The same page on a phone](assets/phone.png)
+
 Send starts a reply and **Stop** cancels one mid-generation, which matters when
-a small model gets stuck in a loop. The ↻ beside the model picker re-reads the
-installed models. Run on the phone, `momos ui` also opens the page in the
-phone's browser for you.
+a small model gets stuck in a loop. While a reply arrives the composer shows how
+fast it is going, and each finished reply is stamped with the model that wrote
+it. The ↻ beside the model picker re-reads the installed models. Run on the
+phone, `momos ui` also opens the page in the phone's browser for you.
+
+The chat list collapses to a strip of initials, or slides in over the
+conversation on a phone; above it is a box to filter by title.
 
 The picker offers everything `momos models` would list, and each chat keeps the
 model it was using — so a DeepSeek R1 reasoning thread and a small quick model
-can sit side by side. A new chat starts from whichever model you used last; run
-`momos chat <model>` once if the page tells you no model is chosen. Picking a
-different model mid-conversation changes who answers from the next message on,
-and the replies already on screen stay as they were.
+can sit side by side. A new chat starts from whichever model you used last, or
+from one you pick if the page opens with none chosen. Picking a different model
+mid-conversation changes who answers from the next message on, and the replies
+already on screen stay as they were.
 
 Chats are saved in the browser, not on the phone, and reopening the page brings
 back the one you left off in. Two consequences worth knowing:
